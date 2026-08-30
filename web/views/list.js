@@ -1,7 +1,5 @@
 import { SCORE_LABELS, displayValue, navigate, rerender, state, syncHash, viewKey } from '../app.js';
 
-const THRESHOLDS = ['0.60', '0.65', '0.70'];
-
 function segmented(options, current, onPick, small = false) {
   const wrap = document.createElement('div');
   wrap.className = small ? 'seg small' : 'seg';
@@ -78,7 +76,15 @@ export function renderList(app, snapshot) {
   row.className = 'row2';
   row.append(
     segmented([['raw', 'Raw'], ['voladj', 'Vol-adjusted']], state.mode, (v) => { state.mode = v; }, true),
-    segmented(THRESHOLDS.map((t) => [t, `ρ ${t}`]), state.threshold, (v) => { state.threshold = v; }, true),
+    // Read from the snapshot rather than a hardcoded copy, so changing
+    // THRESHOLDS in config cannot leave the UI offering a value the data
+    // does not carry.
+    segmented(
+      Object.keys(view.groups).sort().map((t) => [t, `ρ ${t}`]),
+      state.threshold,
+      (v) => { state.threshold = v; },
+      true,
+    ),
   );
   controls.append(row);
 

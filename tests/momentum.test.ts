@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { horizonStats } from '../src/pipeline/momentum.ts';
-import { alignToCalendar, asOfIndex, buildMasterCalendar } from '../src/pipeline/calendar.ts';
+import { alignToCalendar, buildMasterCalendar } from '../src/pipeline/calendar.ts';
 import { sampleStdDev, percentileSorted, simpleReturns } from '../src/pipeline/stats.ts';
 import { TRADING_DAYS_PER_YEAR, VOL_FLOOR_ANNUALIZED } from '../src/config.ts';
 import type { AdjustedBar, History } from '../src/fmp/types.ts';
@@ -119,13 +119,6 @@ describe('master calendar and as-of alignment', () => {
   it('is independent of the order histories are supplied in', () => {
     const hs = [mk('A', ['2026-01-02', '2026-01-05']), mk('B', ['2026-01-02', '2026-01-05'])];
     expect(buildMasterCalendar(hs, 2)).toEqual(buildMasterCalendar([...hs].reverse(), 2));
-  });
-
-  it('finds the last bar on or before a target date', () => {
-    const bars = [bar('A', '2026-01-02', 1), bar('A', '2026-01-06', 2), bar('A', '2026-01-08', 3)];
-    expect(asOfIndex(bars, '2026-01-07')).toBe(1);
-    expect(asOfIndex(bars, '2026-01-08')).toBe(2);
-    expect(asOfIndex(bars, '2026-01-01')).toBe(-1);
   });
 
   it('carries the prior close across a halt and flags it as not actual', () => {

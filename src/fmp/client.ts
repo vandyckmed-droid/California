@@ -3,7 +3,10 @@ import {
   CONCURRENCY,
   FMP_BASE,
   MAX_RETRIES,
+  RATE_LIMIT_BACKOFF_FACTOR,
   RATE_LIMIT_COOLDOWN_MS,
+  RATE_LIMIT_DECAY_AFTER_CLEAN,
+  RATE_LIMIT_MAX_BACKOFF,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_PER_MIN,
   REQUEST_TIMEOUT_MS,
@@ -49,22 +52,42 @@ function requireApiKey(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Non-2xx responses that will never succeed on retry. */
+function isPermanent(status: number): boolean {
+  return status === 401 || status === 402 || status === 403 || status === 404;
+}
+
 /**
  * Spaces requests across the whole client so the concurrent pool cannot exceed
  * the API's per-minute budget.
  *
  * Slots are reserved rather than merely counted: each caller claims the next
- * free instant and waits for it, so a burst of eight workers self-arranges into
- * an even stream instead of all firing at once. When the API reports a 429 the
- * limiter both parks every worker and permanently eases its own rate, so one
- * complaint is enough to settle the run down for good.
+ * free instant and waits for it, so a burst of workers self-arranges into an
+ * even stream instead of all firing at once.
+ *
+ * Backoff is scoped to a rate-limit *episode*, not to each 429 response. With
+ * N workers in flight one episode produces up to N responses, and easing the
+ * rate once per response compounds — at concurrency 8 that is a 6x cut from a
+ * single episode, and repeated episodes drive the budget to nearly zero. So
+ * the first report opens an episode window and later reports inside it are
+ * ignored, the easing is clamped to a ceiling, and a stretch of clean
+ * responses decays the rate back toward the configured budget.
  */
-class RateLimiter {
+export class RateLimiter {
+  private readonly baseIntervalMs: number;
+  private readonly maxIntervalMs: number;
   private intervalMs: number;
   private nextSlot = 0;
+  /** End of the current rate-limit episode; reports before this are duplicates. */
+  private episodeUntil = 0;
+  private cleanRun = 0;
+  /** Distinct rate-limit episodes observed, as opposed to 429 responses. */
+  episodes = 0;
 
   constructor(perMinute: number) {
-    this.intervalMs = 60_000 / Math.max(1, perMinute);
+    this.baseIntervalMs = 60_000 / Math.max(1, perMinute);
+    this.intervalMs = this.baseIntervalMs;
+    this.maxIntervalMs = this.baseIntervalMs * RATE_LIMIT_MAX_BACKOFF;
   }
 
   async acquire(): Promise<void> {
@@ -75,10 +98,31 @@ class RateLimiter {
     if (wait > 0) await sleep(wait);
   }
 
-  /** Parks every subsequent request for at least `ms`, and eases the rate. */
-  throttle(ms: number): void {
-    this.nextSlot = Math.max(this.nextSlot, Date.now() + ms);
-    this.intervalMs *= 1.25;
+  /**
+   * Reports a 429. Returns true when this opened a new episode, false when it
+   * is another worker reporting the episode already in progress.
+   */
+  throttle(cooldownMs: number): boolean {
+    const now = Date.now();
+    // A dedicated episode window, kept separate from `nextSlot`: the scheduling
+    // cursor normally sits in the future under load, so it cannot distinguish
+    // a fresh episode from an ongoing one.
+    if (now < this.episodeUntil) return false;
+
+    this.episodes++;
+    this.episodeUntil = now + cooldownMs;
+    this.nextSlot = Math.max(this.nextSlot, now + cooldownMs);
+    this.intervalMs = Math.min(this.intervalMs * RATE_LIMIT_BACKOFF_FACTOR, this.maxIntervalMs);
+    this.cleanRun = 0;
+    return true;
+  }
+
+  /** Records a clean response, decaying the rate back toward the budget. */
+  recordSuccess(): void {
+    if (this.intervalMs <= this.baseIntervalMs) return;
+    if (++this.cleanRun < RATE_LIMIT_DECAY_AFTER_CLEAN) return;
+    this.cleanRun = 0;
+    this.intervalMs = Math.max(this.baseIntervalMs, this.intervalMs / RATE_LIMIT_BACKOFF_FACTOR);
   }
 
   get requestsPerMinute(): number {
@@ -86,17 +130,12 @@ class RateLimiter {
   }
 }
 
-/** Non-2xx responses that will never succeed on retry. */
-function isPermanent(status: number): boolean {
-  return status === 401 || status === 402 || status === 403 || status === 404;
-}
-
 export class FmpClient {
   private readonly key: string;
   private readonly limiter: RateLimiter;
   /** Requests that returned 200 with an empty body — genuinely dataless symbols. */
   readonly emptyResponses: string[] = [];
-  /** Number of times the API asked us to slow down. Reported at the end of a run. */
+  /** 429 responses seen. Several can belong to one rate-limit episode. */
   rateLimitHits = 0;
 
   constructor(key?: string, perMinute: number = RATE_LIMIT_PER_MIN) {
@@ -106,6 +145,11 @@ export class FmpClient {
 
   get requestsPerMinute(): number {
     return this.limiter.requestsPerMinute;
+  }
+
+  /** Distinct rate-limit episodes, as opposed to individual 429 responses. */
+  get rateLimitEpisodes(): number {
+    return this.limiter.episodes;
   }
 
   private url(path: string, params: Record<string, string | number>): string {
@@ -128,7 +172,10 @@ export class FmpClient {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
-        if (res.ok) return (await res.json()) as T;
+        if (res.ok) {
+          this.limiter.recordSuccess();
+          return (await res.json()) as T;
+        }
 
         const body = (await res.text().catch(() => '')).slice(0, 200);
         if (res.status === 401 || res.status === 403) {
@@ -220,18 +267,29 @@ export async function mapPool<T, R>(
   const out = new Map<T, R>();
   let next = 0;
   let done = 0;
+  const aborted: unknown[] = [];
 
   const runner = async (): Promise<void> => {
-    while (true) {
+    // A worker rejection stops the pool promptly instead of letting the rest of
+    // the queue drain, and is re-thrown to the caller once every runner has
+    // settled — so a fatal error (a revoked key, say) surfaces immediately and
+    // without leaving unhandled rejections behind it.
+    while (aborted.length === 0) {
       const i = next++;
       if (i >= items.length) return;
       const item = items[i] as T;
-      out.set(item, await worker(item));
+      try {
+        out.set(item, await worker(item));
+      } catch (err) {
+        aborted.push(err);
+        return;
+      }
       done++;
       if (onProgress && (done % 100 === 0 || done === items.length)) onProgress(done, items.length);
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runner));
+  if (aborted.length > 0) throw aborted[0];
   return out;
 }

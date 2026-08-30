@@ -117,6 +117,32 @@ check('detail: chart features left enabled',
   cfg.hide_side_toolbar === false && cfg.hide_top_toolbar === false && cfg.hide_legend === false &&
   cfg.hide_volume === false && cfg.withdateranges === true && cfg.allow_symbol_change === true);
 
+// ---- stale or malformed hash params ----------------------------------------
+// A bookmark from before a params change must still render, not blank the page.
+const stale = await newPage();
+for (const [hash, label] of [
+  ['#/?score=h12_1&mode=raw&threshold=0.75', 'unknown threshold'],
+  ['#/?score=h3_1&mode=raw&threshold=0.65', 'unknown score'],
+  ['#/?score=h12_1&mode=sideways&threshold=0.65', 'unknown mode'],
+  ['#/?threshold=', 'empty threshold'],
+]) {
+  await stale.goto(`${base}${hash}`, { waitUntil: 'domcontentloaded' });
+  let rendered = false;
+  try {
+    await stale.waitForSelector('.card', { timeout: 8000 });
+    rendered = true;
+  } catch {
+    rendered = false;
+  }
+  const r = rendered
+    ? await stale.evaluate(() => ({
+        rows: document.querySelectorAll('.stock').length,
+        stuck: !!document.querySelector('.loading'),
+      }))
+    : { rows: 0, stuck: true };
+  check(`stale hash (${label}): still renders the screen`, r.rows > 0 && !r.stuck, JSON.stringify(r));
+}
+
 // ---- back navigation preserves the chosen view -----------------------------
 // A fresh page: navigating by hash away from a page that already holds a chart
 // iframe never reaches "networkidle", which is a harness quirk, not a bug.

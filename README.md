@@ -150,9 +150,19 @@ run B dataHash: 7ffdd4ac06c81dcdd871260a0f2e8c97ae3b7e4beeebd019b81b8640c4b934e1
 
 **Fetch failures are fatal by design.** A dry run lost a contiguous alphabetical block of ~70
 symbols to HTTP 429 rate limiting; treating those as "no data" would silently shrink the universe and
-change the ranking between runs. The client therefore distinguishes a transient error (retry, then
-abort the run) from a genuine `200` with an empty body (a dataless symbol, recorded as an ordinary
-exclusion), and paces itself under a measured ~550 requests/minute budget with adaptive backoff.
+change the ranking between runs. The client therefore distinguishes three cases: a genuine `200` with
+an empty body is a dataless symbol and an ordinary exclusion; a transient error is retried and then
+aborts the run; and an authentication failure is re-thrown immediately rather than collected, so a
+key revoked mid-run reports the real cause instead of thousands of downstream "fetch failures".
+
+Pacing is scoped to a rate-limit **episode**, not to each 429 response. With N workers in flight one
+episode produces up to N responses, and easing the rate once per response compounds — at concurrency
+8 that is a 6× cut from a single episode, and repeated episodes drive the budget to nearly zero with
+no way back. So the first report opens an episode window, later reports inside it are ignored, the
+easing is clamped to a ceiling, and clean responses decay the rate back toward the configured
+~550/minute budget. `FMP_RATE_LIMIT_PER_MIN` overrides that budget and is validated: a malformed
+value falls back to the default rather than producing a `NaN` interval, which would make every wait
+comparison false and disable rate limiting altogether.
 
 ## The per-ticker screen
 

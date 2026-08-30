@@ -64,7 +64,6 @@ export const BLEND_WEIGHT = 1 / 3;
 
 export const CORR_WINDOW = 126;
 export const THRESHOLDS = [0.6, 0.65, 0.7] as const;
-export const DEFAULT_THRESHOLD = 0.65;
 export const TOP_N = 100;
 
 // ---------------------------------------------------------------------------
@@ -96,11 +95,40 @@ export const REQUEST_TIMEOUT_MS = 60_000;
  * HTTP 429 partway through the universe. Staying under the cap is what keeps
  * the run from losing names to rate limiting.
  */
-export const RATE_LIMIT_PER_MIN = Number(process.env.FMP_RATE_LIMIT_PER_MIN ?? 550);
+export const RATE_LIMIT_DEFAULT_PER_MIN = 550;
+
+/**
+ * Parsed strictly: `??` only catches undefined/null, so an empty or malformed
+ * value would otherwise yield NaN, and a NaN interval makes every wait
+ * comparison false — silently disabling rate limiting entirely and running the
+ * pool flat out at the rate that trips 429s.
+ */
+function positiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[config] Ignoring invalid $${name}=${JSON.stringify(raw)}; using ${fallback}.`);
+    return fallback;
+  }
+  return parsed;
+}
+
+export const RATE_LIMIT_PER_MIN = positiveNumberEnv(
+  'FMP_RATE_LIMIT_PER_MIN',
+  RATE_LIMIT_DEFAULT_PER_MIN,
+);
+
 /** How long to hold every worker back after the API reports a 429. */
 export const RATE_LIMIT_COOLDOWN_MS = 60_000;
 /** Extra attempts granted to a 429, which is transient by definition. */
 export const RATE_LIMIT_MAX_RETRIES = 6;
+/** How much one rate-limit episode eases the request rate. */
+export const RATE_LIMIT_BACKOFF_FACTOR = 1.25;
+/** Hard ceiling on that easing, as a multiple of the configured interval. */
+export const RATE_LIMIT_MAX_BACKOFF = 8;
+/** Clean responses required before the rate decays back toward the budget. */
+export const RATE_LIMIT_DECAY_AFTER_CLEAN = 50;
 /**
  * A transient network failure that silently drops names would change the
  * ranking run to run, so by default a single unrecovered failure aborts.

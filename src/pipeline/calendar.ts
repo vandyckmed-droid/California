@@ -36,26 +36,6 @@ export interface AlignedSeries {
 }
 
 /**
- * Index of the last bar dated on-or-before `target`, or -1. Binary search over
- * the oldest-first bar array.
- */
-export function asOfIndex(bars: { date: string }[], target: string): number {
-  let lo = 0;
-  let hi = bars.length - 1;
-  let best = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if ((bars[mid] as { date: string }).date <= target) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return best;
-}
-
-/**
  * Projects a name's bars onto the master calendar using as-of lookup, so an
  * isolated halt carries the prior close forward instead of dropping the name.
  */

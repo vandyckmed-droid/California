@@ -77,6 +77,11 @@ async function main(): Promise<void> {
       try {
         return await client.history(symbol, from, to);
       } catch (err) {
+        // A revoked or downgraded key is neither transient nor per-symbol.
+        // Collecting it would burn the rest of the universe and then report
+        // thousands of "fetch failures" with the real cause buried, so it goes
+        // straight to the top-level handler that explains it.
+        if (err instanceof FmpAuthError) throw err;
         // A transient network failure that silently dropped names would change
         // the ranking between runs, so failures are collected and then fatal.
         failures.push(`${symbol}: ${err instanceof Error ? err.message : String(err)}`);
@@ -91,7 +96,8 @@ async function main(): Promise<void> {
   log(
     `fetched in ${((Date.now() - started) / 1000).toFixed(0)}s` +
       (client.rateLimitHits > 0
-        ? ` (backed off ${client.rateLimitHits}x; now ${client.requestsPerMinute} req/min)`
+        ? ` (${client.rateLimitHits} rate-limit responses across ${client.rateLimitEpisodes} ` +
+          `episode(s); now ${client.requestsPerMinute} req/min)`
         : ''),
   );
 

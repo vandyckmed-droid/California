@@ -60,8 +60,29 @@ export function navigate(route) {
   location.hash = `/${route}?${params}`;
 }
 
+/**
+ * Clamps hash params to what the snapshot actually contains.
+ *
+ * This has to run after every parseHash, not once at boot: rerender() re-reads
+ * the hash, so a correction applied only at startup is overwritten before
+ * anything renders. A stale bookmark carrying a threshold or score that no
+ * longer exists would otherwise render an empty screen, or throw before the
+ * loading placeholder is replaced and leave the page stuck on it.
+ */
+function clampState() {
+  if (!snapshot.views[viewKey()]) {
+    state.score = 'h12_1';
+    state.mode = 'raw';
+  }
+  const available = Object.keys(snapshot.views[viewKey()].groups);
+  if (!available.includes(state.threshold)) {
+    state.threshold = available.includes('0.65') ? '0.65' : available[0];
+  }
+}
+
 export function rerender() {
   const route = parseHash();
+  clampState();
   window.scrollTo(0, 0);
   if (route && route !== '') {
     renderTicker(app, snapshot, decodeURIComponent(route));
@@ -79,15 +100,6 @@ async function boot() {
     app.innerHTML = `<p class="loading">Could not load the snapshot (${String(err)}).<br>
       Run <code>npm run screen</code> to generate <code>web/data/snapshot.json</code>.</p>`;
     return;
-  }
-  parseHash();
-  if (!snapshot.views[viewKey()]) {
-    state.score = 'h12_1';
-    state.mode = 'raw';
-  }
-  const available = Object.keys(snapshot.views[viewKey()].groups);
-  if (!available.includes(state.threshold)) {
-    state.threshold = available.includes('0.65') ? '0.65' : available[0];
   }
   window.addEventListener('hashchange', rerender);
   rerender();

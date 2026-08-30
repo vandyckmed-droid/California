@@ -78,14 +78,26 @@ function mountChart(container, meta, symbol) {
 
   // If the widget host is unreachable the container stays empty; say so rather
   // than leaving a blank rectangle.
+  //
+  // The message is appended beside the widget rather than replacing it: on a
+  // cold cache over a slow connection six seconds is a plausible load time, and
+  // replacing the subtree would delete the loader script along with it, killing
+  // a working load and then mislabelling it as blocked. If the iframe does turn
+  // up later the message removes itself.
   setTimeout(() => {
-    if (!container.querySelector('iframe')) {
-      const p = document.createElement('p');
-      p.className = 'chart-fallback';
-      p.textContent =
-        'The TradingView chart could not load (no network, or the widget host is blocked). The figures below are unaffected.';
-      container.replaceChildren(p);
-    }
+    if (container.querySelector('iframe')) return;
+    const p = document.createElement('p');
+    p.className = 'chart-fallback';
+    p.textContent =
+      'The TradingView chart is taking a while — it may be blocked or offline. The figures below are unaffected.';
+    container.append(p);
+    const observer = new MutationObserver(() => {
+      if (container.querySelector('iframe')) {
+        p.remove();
+        observer.disconnect();
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
   }, 6000);
 }
 
