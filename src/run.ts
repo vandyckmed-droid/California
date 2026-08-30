@@ -9,7 +9,10 @@ import {
   HORIZON_KEYS,
   MAX_LOOKBACK,
   MAX_FETCH_FAILURES,
+  MODES,
+  SCORE_KEYS,
   THRESHOLDS,
+  viewId,
   type HorizonKey,
   type ViewId,
 } from './config.ts';
@@ -18,6 +21,8 @@ import type { History } from './fmp/types.ts';
 import { alignToCalendar, buildMasterCalendar, type AlignedSeries } from './pipeline/calendar.ts';
 import { completeLinkageGroups, type Group } from './pipeline/cluster.ts';
 import { correlationMatrix, windowReturns } from './pipeline/correlation.ts';
+import { buildRankHistory } from './pipeline/rankHistory.ts';
+import { ranksFor, scoresFor } from '../web/lib/model.js';
 import { computeMetrics, type IneligibleReason, type StockMetrics } from './pipeline/momentum.ts';
 import { simpleReturns } from './pipeline/stats.ts';
 import { buildViews } from './pipeline/score.ts';
@@ -290,6 +295,12 @@ async function main(): Promise<void> {
   const json = JSON.stringify(snapshot);
   writeFileSync(out, json);
 
+  // ---- Labs sidecar --------------------------------------------------------
+  // Everything above is the product. This is the Rank River experiment, and it
+  // is deliberately the last thing that happens: the snapshot is already on
+  // disk, so a failure here cannot cost a day's refresh. Core reads none of it.
+  writeRankHistory(dataDir, metrics.map((m) => m.symbol), aligned, calendar, L, snapshot);
+
   const meta = snapshot.meta as { dataHash: string };
   log(`wrote snapshot.json (${(json.length / 1024).toFixed(0)} KB)`);
   log(
@@ -297,6 +308,93 @@ async function main(): Promise<void> {
       `largest ${largestSeries} B)`,
   );
   log(`dataHash ${meta.dataHash}`);
+}
+
+/**
+ * Emits the Labs rank-history sidecar, and refuses to emit a wrong one.
+ *
+ * Two gates run here rather than in a test, because they are assertions about
+ * *this run's* data and only this run has it:
+ *
+ *  1. **Identity.** Backfilled at k=0 the ranking must equal the one the
+ *     snapshot ships, for every name in all eight views. The backfill reuses
+ *     the product's own scorer, so what this actually pins is the indexing —
+ *     an off-by-one would give plausible ranks that are silently a day out.
+ *  2. **Legibility.** How far outside the top 100 the current top 20 roam over
+ *     the window. If nearly all of them sit beyond it the drawing is a row of
+ *     trails pinned to the floor, and the feature is not worth building.
+ *
+ * A failure writes no sidecar and logs why. It never throws: the snapshot is
+ * the product, and an experiment must not be able to break the daily refresh.
+ */
+function writeRankHistory(
+  dataDir: string,
+  symbols: readonly string[],
+  aligned: ReadonlyMap<string, AlignedSeries>,
+  calendar: readonly string[],
+  L: number,
+  snapshot: Record<string, unknown>,
+): void {
+  const labsDir = resolve(dataDir, 'labs');
+  rmSync(labsDir, { recursive: true, force: true });
+  try {
+    const started = Date.now();
+    const history = buildRankHistory(symbols, aligned, calendar, L);
+    const cols = (snapshot as { columns: { symbol: string[] } }).columns;
+
+    // Gate 1 — identity at k=0.
+    const last = history.sessions.length - 1;
+    let checked = 0;
+    for (const score of SCORE_KEYS) {
+      for (const mode of MODES) {
+        const id = viewId(score, mode);
+        const live = ranksFor(scoresFor(snapshot, score, mode), cols.symbol) as number[];
+        const bySymbol = new Map<string, number>();
+        cols.symbol.forEach((sym, i) => bySymbol.set(sym, live[i] as number));
+        const view = history.views[id];
+        if (!view) throw new Error(`rank history is missing the ${id} view`);
+        view.symbols.forEach((sym, n) => {
+          const backfilled = view.ranks[n]?.[last];
+          const shipped = bySymbol.get(sym);
+          if (backfilled !== shipped) {
+            throw new Error(
+              `${id} ${sym}: backfilled #${backfilled} but the snapshot ranks it #${shipped}`,
+            );
+          }
+          checked++;
+        });
+      }
+    }
+    log(`  gate 1 ok: ${checked} backfilled ranks match the snapshot exactly`);
+
+    // Gate 2 — legibility of the default view.
+    const def = history.views[viewId('h12_1', 'raw')];
+    if (!def) throw new Error('rank history is missing the default view');
+    const span = history.sessions.length;
+    const outside = def.ranks.map((t) => t.filter((r) => r === null || r > 100).length);
+    const mostlyOutside = outside.filter((n) => n > span / 2).length;
+    const alwaysOutside = outside.filter((n) => n === span).length;
+    log(
+      `  gate 2: of the top ${def.symbols.length} on 12-1 raw over ${span} sessions, ` +
+        `${mostlyOutside} spend most of the window beyond #100, ${alwaysOutside} never enter it`,
+    );
+    if (alwaysOutside > def.symbols.length / 2) {
+      throw new Error(
+        `legibility gate: ${alwaysOutside} of ${def.symbols.length} trails never enter the top 100`,
+      );
+    }
+
+    mkdirSync(labsDir, { recursive: true });
+    const file = JSON.stringify(history);
+    writeFileSync(resolve(labsDir, 'rank-history.json'), file);
+    log(
+      `wrote labs/rank-history.json (${(file.length / 1024).toFixed(0)} KB, ` +
+        `${span} sessions, ${((Date.now() - started) / 1000).toFixed(1)}s)`,
+    );
+  } catch (err) {
+    // No sidecar, and Labs will say so. The snapshot is already written.
+    log(`  labs: rank history not written — ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
