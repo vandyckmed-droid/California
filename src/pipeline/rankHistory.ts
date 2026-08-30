@@ -64,6 +64,14 @@ export interface RankHistory {
   universe: number;
   /** Per view, the current top N and each one's rank per session. */
   views: Record<string, { symbols: string[]; ranks: (number | null)[][] }>;
+  /**
+   * Symbol-sessions the price rule rejected, and the total considered.
+   *
+   * Logged each run rather than inferred: the guard against unvalidated bars
+   * is invisible when the data is clean, and a number that starts climbing is
+   * the signal that upstream quality has changed.
+   */
+  rejected: { symbolSessions: number; of: number };
 }
 
 /** Snapshot-shaped columns for one session, as `scoresFor` expects them. */
@@ -93,6 +101,7 @@ function columnsAt(
   symbols: readonly string[],
   closes: ReadonlyMap<string, readonly (number | null)[]>,
   L: number,
+  tally?: { rejected: number; considered: number },
 ): SessionColumns | null {
   const usable: string[] = [];
   const momentum: number[][] = HORIZON_KEYS.map(() => []);
@@ -122,7 +131,11 @@ function columnsAt(
       const c = series[i];
       if (c == null || !(c > 0)) { priced = false; break; }
     }
-    if (!priced) continue;
+    if (tally) tally.considered++;
+    if (!priced) {
+      if (tally) tally.rejected++;
+      continue;
+    }
 
     const stats = HORIZON_KEYS.map((key) => {
       const { lookback, skip } = HORIZONS[key];
@@ -217,8 +230,9 @@ export function buildRankHistory(
     if (L - k >= 0) offsets.push(k);
   }
 
+  const tally = { rejected: 0, considered: 0 };
   const perSession = offsets.map((k) => {
-    const cols = columnsAt(symbols, closes, L - k);
+    const cols = columnsAt(symbols, closes, L - k, tally);
     return cols ? ranksForSession(cols) : new Map<ViewId, Map<string, number>>();
   });
 
@@ -245,6 +259,7 @@ export function buildRankHistory(
     sessions: offsets.map((k) => calendar[L - k] as string),
     universe: (latest.get(viewId('h12_1', 'raw')) ?? new Map()).size,
     views,
+    rejected: { symbolSessions: tally.rejected, of: tally.considered },
   };
 }
 

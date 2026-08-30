@@ -367,6 +367,11 @@ function writeRankHistory(
       }
     }
     log(`  gate 1 ok: ${checked} backfilled ranks match the snapshot exactly`);
+    const { symbolSessions, of } = history.rejected;
+    log(
+      `  price rule rejected ${symbolSessions} of ${of} symbol-sessions ` +
+        `(${((symbolSessions / Math.max(of, 1)) * 100).toFixed(2)}%)`,
+    );
 
     // Gate 2 — legibility of the default view.
     const def = history.views[viewId('h12_1', 'raw')];
