@@ -20,19 +20,8 @@ export function windowReturns(series: AlignedSeries, L: number, window: number):
 }
 
 /**
- * Symmetric Pearson correlation matrix over `returns`, indexed the same way as
- * the caller's symbol list. Accumulated in fixed index order so the matrix is
- * bit-identical between runs.
+ * Symmetric Pearson correlation matrix. Implementation shared with the
+ * browser via `web/lib/quant.js`, so the watchlist and the pipeline compute
+ * correlations the same way by construction rather than by agreement.
  */
-export function correlationMatrix(returns: readonly (readonly number[])[]): number[][] {
-  const n = returns.length;
-  const C: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(1));
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const r = pearson(returns[i] as number[], returns[j] as number[]);
-      C[i]![j] = r;
-      C[j]![i] = r;
-    }
-  }
-  return C;
-}
+export { correlationMatrix } from '../../web/lib/quant.js';

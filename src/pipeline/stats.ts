@@ -1,7 +1,14 @@
+export { mean, pearson, simpleReturns } from '../../web/lib/quant.js';
+
 /**
- * Small numeric helpers shared by the scoring stages. Every one of these
- * accumulates in a fixed index order so results do not vary with floating
- * point summation order between runs.
+ * Numeric helpers used only by the pipeline.
+ *
+ * The ones the browser also needs — `mean`, `pearson`, `simpleReturns` — live
+ * in `web/lib/quant.js` and are re-exported above, so there is exactly one
+ * implementation of each rather than two that agree until they don't.
+ *
+ * Everything here accumulates in a fixed index order so results do not vary
+ * with floating point summation order between runs.
  */
 
 /** Sample (n-1) standard deviation. Returns 0 for fewer than two points. */
@@ -10,20 +17,13 @@ export function sampleStdDev(xs: readonly number[]): number {
   if (n < 2) return 0;
   let sum = 0;
   for (let i = 0; i < n; i++) sum += xs[i] as number;
-  const mean = sum / n;
+  const m = sum / n;
   let ss = 0;
   for (let i = 0; i < n; i++) {
-    const d = (xs[i] as number) - mean;
+    const d = (xs[i] as number) - m;
     ss += d * d;
   }
   return Math.sqrt(ss / (n - 1));
-}
-
-export function mean(xs: readonly number[]): number {
-  if (xs.length === 0) return 0;
-  let sum = 0;
-  for (let i = 0; i < xs.length; i++) sum += xs[i] as number;
-  return sum / xs.length;
 }
 
 /**
@@ -47,34 +47,4 @@ export function median(xs: readonly number[]): number {
   if (xs.length === 0) return Number.NaN;
   const sorted = [...xs].sort((a, b) => a - b);
   return percentileSorted(sorted, 0.5);
-}
-
-/** Pearson correlation. Returns 0 when either series has no variance. */
-export function pearson(a: readonly number[], b: readonly number[]): number {
-  const n = Math.min(a.length, b.length);
-  if (n < 2) return 0;
-  const ma = mean(a.slice(0, n));
-  const mb = mean(b.slice(0, n));
-  let cov = 0;
-  let va = 0;
-  let vb = 0;
-  for (let i = 0; i < n; i++) {
-    const da = (a[i] as number) - ma;
-    const db = (b[i] as number) - mb;
-    cov += da * db;
-    va += da * da;
-    vb += db * db;
-  }
-  if (va <= 0 || vb <= 0) return 0;
-  return cov / Math.sqrt(va * vb);
-}
-
-/** Simple daily returns from a close series. */
-export function simpleReturns(closes: readonly number[]): number[] {
-  const out: number[] = [];
-  for (let i = 1; i < closes.length; i++) {
-    const prev = closes[i - 1] as number;
-    if (prev > 0) out.push((closes[i] as number) / prev - 1);
-  }
-  return out;
 }
