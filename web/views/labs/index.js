@@ -1,4 +1,4 @@
-import { navigate } from '../../app.js';
+import { goBack, navigate } from '../../app.js';
 import { renderRankRiver } from './rankRiver.js';
 
 /**
@@ -35,7 +35,7 @@ function renderIndex(app) {
   back.className = 'back';
   back.href = '#';
   back.textContent = '‹ Back to list';
-  back.addEventListener('click', (e) => { e.preventDefault(); navigate(''); });
+  back.addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   head.append(back);
   head.insertAdjacentHTML('beforeend', '<h1>Labs</h1>');
   app.append(head);

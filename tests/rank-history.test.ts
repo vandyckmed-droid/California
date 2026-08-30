@@ -4,7 +4,7 @@ import { buildSnapshot } from '../src/pipeline/snapshot.ts';
 import { horizonStats } from '../src/pipeline/momentum.ts';
 import { ranksFor, scoresFor } from '../web/lib/model.js';
 import {
-  HORIZONS, HORIZON_KEYS, MODES, SCORE_KEYS, VOL_FLOOR_ANNUALIZED, viewId,
+  HORIZONS, HORIZON_KEYS, MAX_LOOKBACK, MODES, SCORE_KEYS, VOL_FLOOR_ANNUALIZED, viewId,
   type HorizonKey,
 } from '../src/config.ts';
 import type { AlignedSeries } from '../src/pipeline/calendar.ts';
@@ -198,5 +198,103 @@ describe('the rank-history backfill', () => {
     // The backfill builds its own snapshot-shaped object for `scoresFor`; if it
     // invented a floor, the vol-adjusted views would silently diverge.
     expect(VOL_FLOOR_ANNUALIZED).toBe(0.175);
+  });
+});
+
+/**
+ * A bad bar outside the validated span must not reach the maths.
+ *
+ * `computeMetrics` guarantees `closes[i] > 0` only over `[L - MAX_LOOKBACK, L]`
+ * for the *latest* session. This backfill reads up to 29 sessions further back,
+ * so the oldest stretch of an old 12-1 window is territory nothing validated —
+ * and `horizonStats` checks the two window endpoints, never the interior.
+ *
+ * The damage is specific and would look like a real finding: `simpleReturns`
+ * skips the return whose previous close is bad, but the return *into* it
+ * evaluates to `null / prev - 1`, which is exactly -100%. One such return
+ * inflates that name's realized volatility in every session whose window covers
+ * it, so its vol-adjusted trail collapses and then "recovers" — a fabricated
+ * arrival in a drawing built to show arrivals. The k=0 gate cannot catch it,
+ * because k=0 is inside the validated span.
+ */
+describe('prices outside the validated span', () => {
+  const BAD_AT = L - 260; // inside [L-281, L-253]: unvalidated by computeMetrics
+
+  // A name that is actually drawn, so the gap assertion below is not vacuous.
+  const victim = history.views[viewId('h12_1', 'raw')]!.symbols[5] as string;
+
+  const withGap = new Map<string, AlignedSeries>();
+  for (const [symbol, series] of aligned) {
+    withGap.set(symbol, { ...series, closes: [...series.closes] });
+  }
+  (withGap.get(victim)!.closes)[BAD_AT] = null;
+
+  const gapped = buildRankHistory(symbols, withGap, calendar, L, 30, 20);
+
+  it('the bad bar sits outside what the product validated', () => {
+    expect(BAD_AT).toBeLessThan(L - MAX_LOOKBACK);
+    expect(BAD_AT).toBeGreaterThanOrEqual(L - 29 - MAX_LOOKBACK);
+  });
+
+  it('still ranks the name today, whose window excludes the bad bar', () => {
+    // k=0 spans [L-252, L] and never reads index L-260, so the newest session
+    // is untouched and the top-20 sets match the clean run exactly.
+    for (const score of SCORE_KEYS) {
+      for (const mode of MODES) {
+        const id = viewId(score, mode);
+        expect(gapped.views[id]!.symbols).toEqual(history.views[id]!.symbols);
+      }
+    }
+  });
+
+  it('drops the name from the sessions whose window covers it', () => {
+    const id = viewId('h12_1', 'raw');
+    const view = gapped.views[id]!;
+    const trail = view.ranks[view.symbols.indexOf(victim)]!;
+    // A gap, not a rank computed from a -100% return. The drawing renders it
+    // as a break in the trail.
+    expect(trail.some((r) => r === null)).toBe(true);
+    expect(trail[trail.length - 1]).not.toBeNull();
+    // The clean run has no gap at all, so the nulls are caused by the bad bar.
+    const cleanTrail = history.views[id]!.ranks[history.views[id]!.symbols.indexOf(victim)]!;
+    expect(cleanTrail.every((r) => r !== null)).toBe(true);
+  });
+
+  it('removes the name cleanly rather than corrupting the session', () => {
+    // Dropping a name shrinks that session's cross-section, so ranks move —
+    // legitimately, and by a bounded amount. The two bounds have different
+    // standing and are set differently:
+    //
+    // Single horizons rank on a raw figure, so removing one name moves the
+    // names below it up by exactly one and nobody else at all. That is
+    // structural, so {0,+1} is asserted exactly, with no margin.
+    //
+    // The blend ranks on winsorised z-scores, which are recomputed over the
+    // changed cross-section, so a name can move either way and the bound is
+    // not structural. Measured on this fixture it is -1..+2; asserted at
+    // -2..+3 for margin, since the point is to catch corruption rather than to
+    // pin an exact number that a fixture change would break.
+    //
+    // A -100% return leaking into a volatility moves a name far further than
+    // either bound, which is what this actually guards.
+    for (const score of SCORE_KEYS) {
+      for (const mode of MODES) {
+        const id = viewId(score, mode);
+        const lo = score === 'blend' ? -2 : 0;
+        const hi = score === 'blend' ? 3 : 1;
+        const clean = history.views[id]!;
+        const dirty = gapped.views[id]!;
+        dirty.symbols.forEach((symbol, n) => {
+          if (symbol === victim) return;
+          const c = clean.ranks[clean.symbols.indexOf(symbol)]!;
+          dirty.ranks[n]!.forEach((r, i) => {
+            if (r === null) return;
+            const shift = (c[i] as number) - r;
+            expect(shift, `${id} ${symbol} moved ${shift} places`).toBeGreaterThanOrEqual(lo);
+            expect(shift, `${id} ${symbol} moved ${shift} places`).toBeLessThanOrEqual(hi);
+          });
+        });
+      }
+    }
   });
 });

@@ -111,10 +111,22 @@ describe('the Labs boundary', () => {
     const sidecar = run.indexOf('writeRankHistory(');
     expect(snapshotWrite).toBeGreaterThan(-1);
     expect(sidecar).toBeGreaterThan(snapshotWrite);
-    // The whole body is wrapped, so a bad experiment costs no refresh.
+
     const body = run.slice(run.indexOf('function writeRankHistory'));
-    expect(body).toContain('try {');
     expect(body).toContain('} catch (err) {');
+
+    // Not just "the function contains a try": *every* call that can throw must
+    // be inside it. An `rmSync` one line above the `try` passed the weaker
+    // version of this test and was the single path by which the experiment
+    // could still fail the daily refresh — `force` only swallows ENOENT, so an
+    // EACCES or EBUSY would propagate out of `main()` and the day's snapshot
+    // would never be committed.
+    const tryAt = body.indexOf('try {');
+    expect(tryAt).toBeGreaterThan(-1);
+    const beforeTry = body.slice(0, tryAt);
+    for (const call of ['rmSync', 'mkdirSync', 'writeFileSync', 'buildRankHistory', 'sessionRanks']) {
+      expect(beforeTry, `${call} runs before the try in writeRankHistory`).not.toContain(call);
+    }
   });
 
   it('only the Labs loader knows the sidecar path', () => {

@@ -336,8 +336,12 @@ function writeRankHistory(
   snapshot: Record<string, unknown>,
 ): void {
   const labsDir = resolve(dataDir, 'labs');
-  rmSync(labsDir, { recursive: true, force: true });
   try {
+    // Inside the try, not before it: `force` only swallows ENOENT, so an
+    // EACCES or EBUSY here would propagate out of `main()` and fail the run —
+    // the one path by which this experiment could still cost a day's refresh,
+    // which is precisely what the rest of this function exists to prevent.
+    rmSync(labsDir, { recursive: true, force: true });
     const started = Date.now();
     const history = buildRankHistory(symbols, aligned, calendar, L);
     const cols = (snapshot as { columns: { symbol: string[] } }).columns;

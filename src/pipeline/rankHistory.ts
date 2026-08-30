@@ -1,6 +1,7 @@
 import {
   HORIZONS,
   HORIZON_KEYS,
+  MAX_LOOKBACK,
   MODES,
   SCORE_KEYS,
   VOL_FLOOR_ANNUALIZED,
@@ -101,6 +102,28 @@ function columnsAt(
   for (const symbol of symbols) {
     const series = closes.get(symbol);
     if (!series) continue;
+
+    // The product's own price rule, applied at *this* session.
+    //
+    // `computeMetrics` only guarantees `closes[i] > 0` over
+    // `[L - MAX_LOOKBACK, L]` for the latest session, and this backfill reads
+    // up to 29 sessions further back, so the oldest stretch of a 12-1 window is
+    // territory nothing has validated. `horizonStats` checks the two window
+    // endpoints and nothing between them, and `simpleReturns` turns a single
+    // null or zero close into a -100% return — one bad bar would inflate that
+    // name's realized volatility for every session whose window covers it,
+    // collapsing its vol-adjusted trail and then "recovering". That is a
+    // fabricated arrival story in a drawing built to show arrivals, and the
+    // k=0 gate cannot see it because k=0 is inside the validated span.
+    const spanStart = L - MAX_LOOKBACK;
+    if (spanStart < 0) continue;
+    let priced = true;
+    for (let i = spanStart; i <= L; i++) {
+      const c = series[i];
+      if (c == null || !(c > 0)) { priced = false; break; }
+    }
+    if (!priced) continue;
+
     const stats = HORIZON_KEYS.map((key) => {
       const { lookback, skip } = HORIZONS[key];
       // `horizonStats` reads closes[L - lookback] and closes[L - skip]; a null

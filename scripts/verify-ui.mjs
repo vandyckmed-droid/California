@@ -670,6 +670,52 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
       perView.h6_1.slice(0, 3).join(','));
   }
 
+  // Back must pop, like every other in-app Back link. Pushing a second entry
+  // leaves the phone's back gesture re-entering the screen you just left.
+  {
+    const nav = await newPage();
+    await nav.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await nav.waitForSelector('.stock');
+    const start = await nav.evaluate(() => history.length);
+    await nav.click('.labs-link');
+    await nav.waitForSelector('.lab .rows .stock');
+    await nav.click('.lab .rows .stock .open');
+    await nav.waitForSelector('svg.river', { timeout: 20000 });
+    await nav.click('.back');                       // river -> labs index
+    await nav.waitForSelector('.lab .rows .stock');
+    const end = await nav.evaluate(() => history.length);
+    // Two forward navigations, one Back: a popping Back leaves the count where
+    // the forward moves put it, a pushing one would add a third entry.
+    check('labs: Back pops rather than pushing', end === start + 2, `${start} → ${end}`);
+
+    // From the Labs index the device gesture must reach the list, not re-enter
+    // Rank River — which is what a pushed Back entry would give you.
+    await nav.goBack();
+    await nav.waitForSelector('.stock .sym', { timeout: 8000 });
+    const where = await nav.evaluate(() =>
+      document.querySelector('svg.river') ? 'river' : document.querySelector('.lab') ? 'labs' : 'list');
+    check('labs: the device back gesture does not re-enter the experiment',
+      where === 'list', where);
+  }
+
+  // "Change view on the list" must actually navigate. It used to call
+  // syncHash('') first, which rewrote the hash via replaceState so the
+  // navigate() that followed assigned an identical hash and did nothing.
+  {
+    const dead = await newPage();
+    await dead.goto(`${base}#/labs/rank-river?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await dead.waitForSelector('svg.river', { timeout: 20000 });
+    await dead.click('.wl-clear');
+    await dead.waitForSelector('.stock .sym', { timeout: 8000 });
+    const landed = await dead.evaluate(() => ({
+      rows: document.querySelectorAll('.stock').length,
+      river: !!document.querySelector('svg.river'),
+      hash: location.hash,
+    }));
+    check('labs: "Change view on the list" reaches the list',
+      landed.rows > 0 && !landed.river && !landed.hash.includes('labs'), JSON.stringify(landed));
+  }
+
   // Core keeps working when the experiment's data is gone.
   // This page provokes a 404 on purpose, so its own console error is expected.
   const noData = await newPage('light', /rank-history\.json|404/);

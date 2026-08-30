@@ -1,4 +1,4 @@
-import { navigate, state, syncHash } from '../../app.js';
+import { goBack, navigate, state } from '../../app.js';
 import { SCORE_LABELS } from '../../lib/model.js';
 import { escapeHtml } from '../list.js';
 import { loadRankHistory } from './data.js';
@@ -69,7 +69,10 @@ export function renderRankRiver(app) {
   back.className = 'back';
   back.href = '#';
   back.textContent = '‹ Labs';
-  back.addEventListener('click', (e) => { e.preventDefault(); navigate('labs'); });
+  // Pops rather than pushes, like every other in-app Back link: pushing a
+  // second entry leaves the phone's back gesture returning into the screen you
+  // just left.
+  back.addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   head.append(back);
   head.insertAdjacentHTML('beforeend', `<h1>Rank River <span class="as-of">experiment</span></h1>`);
   app.append(head);
@@ -192,6 +195,10 @@ function draw(body, history) {
   backToList.type = 'button';
   backToList.className = 'wl-clear';
   backToList.textContent = 'Change view on the list';
-  backToList.addEventListener('click', () => { syncHash(''); navigate(''); });
+  // `navigate` alone. Calling `syncHash('')` first rewrote the hash to the list
+  // URL via `replaceState`, which fires no `hashchange`, so the `navigate` that
+  // followed assigned an identical hash and did nothing at all — the URL
+  // claimed to be the list while the river stayed on screen.
+  backToList.addEventListener('click', () => { navigate(''); });
   body.append(backToList);
 }
