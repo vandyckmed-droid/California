@@ -245,41 +245,46 @@ check('metric: changing it never reorders the list',
 }
 await page.selectOption('select.metric', 'score');
 
-// ---- the volatility metric follows the view --------------------------------
-// Regression: a hardcoded rv[0] showed 12-1 volatility beside a 6-1 ranking,
-// which inverted the floor mark for the 31 names that straddle the floor
-// between those windows.
+// ---- the volatility metric shows the trailing window -----------------------
+// It is deliberately not a horizon figure: the horizons stop 21 sessions short
+// so the momentum signal is not contaminated by the reversal window, and a
+// "how volatile is this name" number that stopped 21 sessions short would just
+// be a month out of date. So it must not move when the view does.
 {
-  const straddler = snapshot.columns.symbol.find((_s, i) =>
-    (snapshot.columns.rv[0][i] < snapshot.meta.params.volFloorAnnualized)
-    !== (snapshot.columns.rv[2][i] < snapshot.meta.params.volFloorAnnualized));
+  // A name whose trailing volatility is far from every horizon's, so a
+  // regression back to a horizon column could not pass by coincidence.
+  let probe = snapshot.columns.symbol[0];
+  let spread = 0;
+  for (let i = 0; i < snapshot.columns.symbol.length; i++) {
+    const d = Math.min(...[0, 1, 2].map((h) => Math.abs(snapshot.columns.rvT[i] - snapshot.columns.rv[h][i])));
+    if (d > spread) { spread = d; probe = snapshot.columns.symbol[i]; }
+  }
   const seen = {};
-  for (const score of ['h12_1', 'h6_1']) {
-    await page.goto(`${base}#/?score=${score}&mode=voladj&metric=vol&search=${straddler}`,
+  for (const score of ['h12_1', 'h6_1', 'blend']) {
+    await page.goto(`${base}#/?score=${score}&mode=voladj&metric=vol&search=${probe}`,
       { waitUntil: 'networkidle' });
     await page.waitForFunction((sym) =>
-      document.querySelector('.stock .sym')?.textContent?.trim() === sym, straddler);
+      document.querySelector('.stock .sym')?.textContent?.trim() === sym, probe);
     seen[score] = await page.evaluate(() => ({
-      // The floor marker is a child span, so read the number, not the node.
-      value: (document.querySelector('.stock .val')?.textContent ?? '').match(/-?\d+%/)?.[0] ?? '',
-      floored: !!document.querySelector('.stock .floor-mark'),
+      value: (document.querySelector('.stock .val')?.textContent ?? '').trim(),
       label: document.querySelector('select.metric option[value=vol]')?.textContent ?? '',
     }));
   }
-  const i = snapshot.columns.symbol.indexOf(straddler);
-  const expect12 = Math.max(snapshot.columns.rv[0][i], snapshot.meta.params.volFloorAnnualized);
-  const expect6 = Math.max(snapshot.columns.rv[2][i], snapshot.meta.params.volFloorAnnualized);
-  check(`vol metric: ${straddler} shows its 12-1 volatility in the 12-1 view`,
-    seen.h12_1.value === `${Math.round(expect12 * 100)}%`, `${seen.h12_1.value} vs ${expect12}`);
-  check(`vol metric: ${straddler} shows its 6-1 volatility in the 6-1 view`,
-    seen.h6_1.value === `${Math.round(expect6 * 100)}%`, `${seen.h6_1.value} vs ${expect6}`);
-  check('vol metric: the floor mark tracks the viewed window',
-    seen.h12_1.floored === (snapshot.columns.rv[0][i] < snapshot.meta.params.volFloorAnnualized)
-    && seen.h6_1.floored === (snapshot.columns.rv[2][i] < snapshot.meta.params.volFloorAnnualized),
-    `12-1 ${seen.h12_1.floored} / 6-1 ${seen.h6_1.floored}`);
-  check('vol metric: the label names the window it is showing',
-    seen.h12_1.label.includes('12') && seen.h6_1.label.includes('6'),
-    `${seen.h12_1.label} / ${seen.h6_1.label}`);
+  const i = snapshot.columns.symbol.indexOf(probe);
+  const expected = `${Math.round(snapshot.columns.rvT[i] * 100)}%`;
+  const W = snapshot.meta.params.trailingVolWindow;
+  check(`vol metric: ${probe} shows its trailing ${W}d volatility`,
+    seen.h12_1.value === expected, `${seen.h12_1.value} vs ${expected}`);
+  check('vol metric: the figure does not move with the view',
+    seen.h12_1.value === seen.h6_1.value && seen.h6_1.value === seen.blend.value,
+    Object.entries(seen).map(([k, v]) => `${k}=${v.value}`).join(' '));
+  check(`vol metric: ${probe} is not any horizon's volatility`,
+    [0, 1, 2].every((h) => expected !== `${Math.round(snapshot.columns.rv[h][i] * 100)}%`),
+    `${expected} vs ${[0, 1, 2].map((h) => Math.round(snapshot.columns.rv[h][i] * 100) + '%').join('/')}`);
+  check(`vol metric: the label reads "Volatility (${W}d)"`,
+    seen.h12_1.label.trim() === `Volatility (${W}d)`, seen.h12_1.label);
+  check('vol metric: no floor mark, since nothing divides by this figure',
+    await page.evaluate(() => !document.querySelector('.stock .floor-mark')));
 }
 
 // ---- the search caret stays where you put it -------------------------------

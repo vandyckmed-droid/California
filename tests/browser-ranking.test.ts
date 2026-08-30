@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  applyFilters, buildRows, horizonIndexFor, markedRows, METRICS, ranksFor, scoresFor, SCORE_KEYS,
+  applyFilters, buildRows, markedRows, METRICS, ranksFor, scoresFor, SCORE_KEYS,
 } from '../web/lib/model.js';
 import { buildViews } from '../src/pipeline/score.ts';
 import { MODES, THRESHOLDS, VOL_FLOOR_ANNUALIZED, type HorizonKey } from '../src/config.ts';
@@ -191,51 +191,105 @@ describe('"moves with something you hold" marking', () => {
 });
 
 /**
- * The displayed volatility must be the quantity the view's score divides by.
+ * The volatility the list shows is the trailing window, not a horizon window.
  *
- * This pins the relationship rather than any value, because the bug it guards
- * was not a wrong number but a right number from the wrong window: the metric
- * read a hardcoded `rv[0]`, so the 6-1 and 9-1 views showed 12-1 volatility
- * beside a ranking built on a different one. 31 names in the shipped snapshot
- * straddle the floor between those two windows, and for each of them the floor
- * marker read exactly backwards.
+ * Every horizon stops 21 sessions short so the momentum signal is not
+ * contaminated by the reversal window it excludes. This figure answers the
+ * opposite question and therefore runs right up to the latest session — so the
+ * property to pin is that it *includes* the month the horizons skip, and does
+ * not move when the view does.
+ *
+ * Checked against the committed price history rather than against another
+ * column: the per-symbol correlation blocks cover exactly the trailing window,
+ * so recomputing the volatility from them tests the pipeline's number against
+ * the closes it came from, not against itself.
  */
-describe('the volatility metric follows the view', () => {
+describe('the volatility metric shows the trailing window', () => {
   const vol = METRICS.find((m) => m.key === 'vol')!;
   const c = snapshot.columns;
-  const floor = snapshot.meta.params.volFloorAnnualized;
+  const W: number = snapshot.meta.params.trailingVolWindow;
 
-  for (const score of ['h12_1', 'h9_1', 'h6_1'] as const) {
-    it(`${score}: shows the divisor the vol-adjusted score uses`, () => {
-      const h = horizonIndexFor(score);
-      const raw = scoresFor(snapshot, score, 'raw');
-      const adjusted = scoresFor(snapshot, score, 'voladj');
-
-      for (let i = 0; i < c.symbol.length; i++) {
-        const shown = vol.get(snapshot, i, 0, h);
-        // The vol-adjusted score is momentum / effectiveVol, so multiplying it
-        // back by the displayed figure must recover the raw score. Stated as a
-        // product rather than a quotient because a name with zero momentum
-        // gives 0/0 either way round.
-        expect(adjusted[i]! * shown).toBeCloseTo(raw[i]!, 9);
-        expect(vol.floored!(snapshot, i, h)).toBe(c.rv[h][i] < floor);
-      }
-    });
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  /** Decodes a correlation-grade block back to closes. */
+  function decode(block: { points: string; lo: number; hi: number; w?: number }): number[] {
+    const w = block.w ?? 2;
+    const top = ALPHABET.length ** w - 1;
+    const span = block.hi - block.lo;
+    const out: number[] = [];
+    for (let i = 0; i + w <= block.points.length; i += w) {
+      let level = 0;
+      for (let ch = 0; ch < w; ch++) level = level * ALPHABET.length + ALPHABET.indexOf(block.points[i + ch]!);
+      out.push(block.lo + (span * level) / top);
+    }
+    return out;
   }
 
-  it('the blend names the horizon it fell back to', () => {
-    // The blend averages three horizons and so has no single divisor. It may
-    // show one, but it may not show it unlabelled.
-    expect(horizonIndexFor('blend')).toBe(0);
-    expect(vol.labelFor!('blend')).toContain('12–1');
-    expect(vol.labelFor!('h6_1')).toContain('6–1');
+  const annualized = (rets: number[]) => {
+    const n = rets.length;
+    const m = rets.reduce((a, b) => a + b, 0) / n;
+    const ss = rets.reduce((a, b) => a + (b - m) ** 2, 0);
+    return Math.sqrt(ss / (n - 1)) * Math.sqrt(252);
+  };
+
+  // A spread of the universe rather than the first few alphabetically.
+  const sample = [0, 137, 411, 900, 1400, 1900, 2300, c.symbol.length - 1]
+    .filter((i) => i < c.symbol.length);
+
+  it('is a whole column, present for every name', () => {
+    expect(c.rvT).toHaveLength(c.symbol.length);
+    expect(c.rvT.every((v: number) => Number.isFinite(v) && v > 0)).toBe(true);
   });
 
-  it('at least one name would have been shown the wrong window', () => {
-    // Guards the guard: if no name ever straddles the floor between windows,
-    // the assertions above would pass against the old hardcoded index too.
-    const straddlers = c.symbol.filter((_s: string, i: number) =>
-      (c.rv[0][i] < floor) !== (c.rv[2][i] < floor));
-    expect(straddlers.length).toBeGreaterThan(0);
+  it(`recomputes from the last ${W} sessions of committed closes`, () => {
+    for (const i of sample) {
+      const symbol = c.symbol[i];
+      const file = JSON.parse(readFileSync(`web/data/series/${symbol}.json`, 'utf8'));
+      const closes = decode(file.correlation);
+      // window returns come from window + 1 closes, ending at the latest session
+      expect(closes).toHaveLength(W + 1);
+      const rets = closes.slice(1).map((v, k) => v / closes[k]! - 1);
+      expect(rets).toHaveLength(W);
+      // The series is quantized to 4096 levels, so this is a window-and-method
+      // check with a tolerance, not a bit-for-bit one.
+      expect(annualized(rets)).toBeCloseTo(c.rvT[i], 2);
+    }
+  });
+
+  it('includes the month every horizon skips', () => {
+    // h6_1 starts at the same session but stops 21 short, so the extra month is
+    // the whole difference between the two. Measured, it moves the answer by a
+    // median 1.37pp against h6_1 and 3.50pp against h12_1 — this asserts the
+    // smaller of those, halved, so the test fails if the column ever silently
+    // becomes a horizon column.
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+    const gap = (h: number) => median(c.symbol.map((_s: string, i: number) => Math.abs(c.rvT[i] - c.rv[h][i])));
+    for (const h of [0, 1, 2]) expect(gap(h)).toBeGreaterThan(0.0068);
+
+    // Exact ties still happen: both columns are rounded to four places, and two
+    // similar quantities collide there by chance. 8 of 7,716 comparisons in the
+    // shipped snapshot. A column that *was* a horizon column would tie on all
+    // 2,572, so the assertion is on the rate, not on zero.
+    const ties = c.symbol.reduce((n: number, _s: string, i: number) =>
+      n + [0, 1, 2].filter((h) => Math.abs(c.rvT[i] - c.rv[h][i]) < 1e-9).length, 0);
+    expect(ties / (c.symbol.length * 3)).toBeLessThan(0.01);
+  });
+
+  it('does not move when the view does', () => {
+    // The number describes the name, not the ranking. `get` takes no horizon.
+    for (const i of sample) {
+      const seen = new Set(SCORE_KEYS.map((k) => vol.get(snapshot, i, scoresFor(snapshot, k, 'raw')[i]!)));
+      expect(seen.size).toBe(1);
+    }
+  });
+
+  it('names its window from the snapshot rather than hardcoding it', () => {
+    expect(vol.labelFor!(snapshot)).toBe(`Volatility (${W}d)`);
+    expect(W).toBe(126);
+  });
+
+  it('is reported unfloored', () => {
+    // Nothing divides by this, so flooring it would overstate every quiet name.
+    const floor = snapshot.meta.params.volFloorAnnualized;
+    expect(c.rvT.some((v: number) => v < floor)).toBe(true);
   });
 });

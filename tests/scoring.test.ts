@@ -15,7 +15,8 @@ function metrics(
     const effectiveVol = Math.max(rvol, VOL_FLOOR_ANNUALIZED);
     horizons[k] = { momentum: mom, realizedVol: rvol, effectiveVol, volAdjusted: mom / effectiveVol };
   }
-  return { symbol, horizons, latestClose: 50, dollarVolume: 1e8 };
+  // Scoring never reads trailingVol; it is reported, not ranked on.
+  return { symbol, horizons, trailingVol: 0.3, latestClose: 50, dollarVolume: 1e8 };
 }
 
 const flat = (mom: number, rvol = 0.4) => ({

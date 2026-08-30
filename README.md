@@ -87,6 +87,31 @@ volAdjusted    = rawMomentum / effectiveVol
 
 So a name gains no extra credit for realized volatility below 17.5%.
 
+### Displayed volatility (126d)
+
+Separate quantity, separate purpose. The `Show ▾` selector's **Volatility (126d)** is the
+annualized sample standard deviation of daily returns over the **most recent 126 sessions,
+including the month every horizon skips** — `t−126 → t`, 126 returns from 127 closes, annualized
+with √252.
+
+It is not any horizon's `realizedVol`, and that is the point. A horizon stops 21 sessions short so
+a momentum signal is not contaminated by the short-term reversal window it excludes; "how volatile
+is this name" is the opposite question, and an answer that ends a month ago is stale exactly when
+it matters. Switching between 12–1, 9–1, 6–1 and Blend changes the ranking, not this number.
+
+Two consequences worth stating:
+
+- **Reported unfloored.** The 17.5% floor exists because the vol-adjusted views divide by it.
+  Nothing divides by this figure, so flooring it would overstate every quiet name and a "floor"
+  mark would point at a mechanism the number is not part of. The floored per-horizon figures are
+  on the ticker screen, beside the ranking that uses them.
+- **The window is the correlation window.** `TRAILING_VOL_WINDOW = CORR_WINDOW`, so the figure on
+  the list is the same quantity the watchlist reports per name — two constants that both happened
+  to read 126 could drift apart and the screens would quietly disagree about one name.
+
+Shipped as `columns.rvT`, with `meta.params.trailingVolWindow` naming the window so the label
+cannot drift from the data.
+
 ### Normalization and the blend
 
 Each horizon's scores are winsorized at the 1st/99th percentile of the eligible cross-section and
@@ -196,7 +221,8 @@ src/config.ts             every tunable constant
 src/fmp/                  stable-API client: rate limiting, retry, hard-fail
 src/pipeline/universe     screener + exclusion rules
 src/pipeline/calendar     master calendar, as-of alignment, coverage
-src/pipeline/momentum     per-horizon momentum + volatility + the floor
+src/pipeline/momentum     per-horizon momentum + volatility + the floor, and the
+                          trailing 126d volatility the list displays
 src/pipeline/normalize    winsorized cross-sectional z-score
 src/pipeline/score        eight views, blending, ranking
 src/pipeline/correlation  126d returns + Pearson matrix
