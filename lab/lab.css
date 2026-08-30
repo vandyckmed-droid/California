@@ -1,0 +1,87 @@
+/* Additions only. `../web/styles.css` carries every product token and every
+   component the concept panes reuse, so a concept can never drift from the
+   product's own type, spacing or colour. */
+
+body.lab { background: var(--chip); padding: 0 0 60px; }
+.lab-head { max-width: 1180px; margin: 0 auto; padding: 26px 20px 8px; }
+.lab-head h1 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+.lab-head p { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 62ch; }
+.lab-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.lab-tabs button {
+  min-height: 38px; padding: 0 13px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.lab-tabs button[aria-pressed="true"] {
+  background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 560;
+}
+.lab-stage { max-width: 1180px; margin: 0 auto; padding: 18px 20px; }
+.lab-pitch { margin: 0 0 18px; font-size: 14px; line-height: 1.6; color: var(--text); max-width: 74ch; }
+.lab-pitch b { font-weight: 600; }
+.lab-pair { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.lab-col { flex: 0 0 390px; max-width: 100%; }
+.lab-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--muted); font-weight: 600; margin: 0 0 7px; display: flex;
+  align-items: center; gap: 7px;
+}
+.lab-label .tagword {
+  font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--faint);
+}
+.lab-frame {
+  width: 390px; height: 844px; max-width: 100%;
+  border: 1px solid var(--border-strong); border-radius: 14px; overflow: hidden;
+  background: var(--bg);
+}
+.lab-frame iframe { width: 390px; height: 844px; border: 0; display: block; }
+.lab-frame.scroll { overflow-y: auto; }
+.lab-notes { margin-top: 22px; display: grid; gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+.lab-notes div { background: var(--surface); padding: 13px 15px; }
+.lab-notes dt { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--accent-strong); font-weight: 600; margin-bottom: 5px; }
+.lab-notes dd { margin: 0; font-size: 12.6px; line-height: 1.55; color: var(--muted); }
+.lab-notes dd b { color: var(--text); font-weight: 560; }
+
+/* ---------- concept 1: the horizon comb ---------- */
+/* Sits between the name and the number, inside the existing 44px row. */
+.stock .open.has-comb { grid-template-columns: 30px 1fr 54px auto; gap: 8px; }
+.comb { display: block; overflow: visible; }
+.comb-base { stroke: var(--border-strong); stroke-width: 1; }
+.comb-tooth { stroke: var(--faint); stroke-width: 4; stroke-linecap: round; }
+.comb-tooth.on { stroke: var(--text); stroke-width: 5.5; }
+.comb-spine { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.comb-spine.up { stroke: var(--pos); }
+.comb-spine.dn { stroke: var(--neg); }
+.comb-spine.flat { stroke: var(--faint); }
+.comb-key { display: flex; flex-wrap: wrap; gap: 12px; padding: 9px 13px 2px;
+  font-size: 11px; color: var(--faint); }
+.comb-key i { display: inline-block; width: 14px; height: 2px; vertical-align: middle;
+  margin-right: 5px; }
+
+/* ---------- concept 2: the same-trade rail ---------- */
+.stock .open.has-rail { grid-template-columns: 5px 30px 1fr auto; gap: 9px; padding-left: 8px; }
+.rail { width: 5px; align-self: stretch; margin: 4px 0; border-radius: 3px; }
+.rail.solo { background: transparent; }
+.nof {
+  display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 4px;
+  font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+  vertical-align: 1px; letter-spacing: .01em;
+}
+.nof.first { font-weight: 700; }
+.railnote { padding: 9px 13px 2px; font-size: 11px; color: var(--faint); line-height: 1.5; }
+
+/* ---------- concept 3: the weave ---------- */
+.weave-wrap { padding: 10px 12px 4px; }
+.weave-canvas { display: block; width: 100%; height: auto; }
+.weave-read { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+  background: var(--border); border-top: 1px solid var(--border); }
+.weave-read div { background: var(--surface); padding: 8px 12px; }
+.weave-read dt { font-size: 9.5px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--muted); margin-bottom: 2px; }
+/* Uppercasing a lowercase rho turns it into a capital that reads as a Latin P. */
+.weave-read dt.lc { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+.weave-read dd { margin: 0; font-size: 16px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.weave-cap { padding: 9px 13px 4px; font-size: 11.5px; color: var(--faint); line-height: 1.5; }
