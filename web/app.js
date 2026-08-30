@@ -1,94 +1,156 @@
 /**
  * Phone-first reader for the momentum snapshot.
  *
- * Everything on screen is precomputed by the pipeline: switching horizon,
- * volatility mode or correlation threshold only re-reads the snapshot, so the
- * UI never recomputes a ranking and cannot disagree with the stored one.
+ * Everything on the home screen comes from one file with no prices in it, so
+ * the ranked list is interactive immediately. Price series are fetched per
+ * symbol, only when a chart or the watchlist actually needs one.
  */
+import { buildRows, ranksFor, scoresFor } from './lib/model.js';
 import { renderList } from './views/list.js';
 import { renderTicker } from './views/ticker.js';
 
-const app = document.getElementById('app');
+const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
-/** Display state. Kept in the URL hash so the back button behaves. */
+/** Display state, mirrored into the URL hash so the back button behaves. */
 export const state = {
   score: 'h12_1',
   mode: 'raw',
   threshold: '0.65',
+  sectors: /** @type {Set<string>} */ (new Set()),
+  minMarketCap: 0,
+  search: '',
 };
 
-export const SCORE_LABELS = { h12_1: '12–1', h9_1: '9–1', h6_1: '6–1', blend: 'Blend' };
-export const HORIZONS = ['h12_1', 'h9_1', 'h6_1'];
-
+/** @type {any} */
 let snapshot = null;
+/** @type {ReturnType<typeof buildRows>} */
+let rows = [];
+/** Ranks are per view, so they are memoized rather than recomputed per render. */
+const rankCache = new Map();
 
-export const pct = (x) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(0)}%`;
-export const num = (x, dp = 2) => x.toFixed(dp);
-
-/** The figure a given view ranks and displays, for one ranked entry. */
-export function displayValue(view, entry) {
-  if (view.scoreKey === 'blend') return { text: num(entry.score, 2), sign: entry.score };
-  if (view.mode === 'voladj') return { text: num(entry.score, 2), sign: entry.score };
-  return { text: pct(entry.score), sign: entry.score };
-}
+export const getSnapshot = () => snapshot;
+export const getRows = () => rows;
 
 export function viewKey() {
   return `${state.score}|${state.mode}`;
+}
+
+/** Universe ranks for the active view. */
+export function currentRanks() {
+  const key = viewKey();
+  let ranks = rankCache.get(key);
+  if (!ranks) {
+    ranks = ranksFor(scoresFor(snapshot, state.score, state.mode), snapshot.columns.symbol);
+    rankCache.set(key, ranks);
+  }
+  return ranks;
+}
+
+export const currentScores = () => scoresFor(snapshot, state.score, state.mode);
+
+export const pct = (/** @type {number} */ x) =>
+  `${x >= 0 ? '+' : ''}${(x * 100).toFixed(0)}%`;
+export const num = (/** @type {number} */ x, dp = 2) => x.toFixed(dp);
+
+/** The figure the active view displays for a row. */
+export function displayValue(score) {
+  if (state.score === 'blend' || state.mode === 'voladj') return { text: num(score, 2), sign: score };
+  return { text: pct(score), sign: score };
+}
+
+/**
+ * Per-symbol price data, fetched on demand and cached for the session.
+ *
+ * The unit of fetch is the unit of use: opening one chart costs that one
+ * name's ~640 bytes, not a bundle of every other name's prices. Nothing is
+ * warmed in the background because there is nothing to warm.
+ *
+ * @type {Map<string, Promise<any>>}
+ */
+const seriesCache = new Map();
+
+/** @param {string} symbol */
+export function loadSeries(symbol) {
+  let pending = seriesCache.get(symbol);
+  if (!pending) {
+    pending = fetch(`data/series/${encodeURIComponent(symbol)}.json`).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+    // A failed fetch must not be cached, or the name is broken for the session.
+    pending.catch(() => seriesCache.delete(symbol));
+    seriesCache.set(symbol, pending);
+  }
+  return pending;
+}
+
+/** Test hook: how many distinct symbols have been requested. */
+export const seriesRequests = () => seriesCache.size;
+
+export function marketCapLabel(v) {
+  return v >= 1e12 ? `$${(v / 1e12).toFixed(2)}T` : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${(v / 1e6).toFixed(0)}M`;
 }
 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, '');
   const [route, query] = raw.split('?');
   const params = new URLSearchParams(query ?? '');
-  for (const key of ['score', 'mode', 'threshold']) {
+  for (const key of ['score', 'mode', 'threshold', 'search']) {
     const v = params.get(key);
-    if (v) state[key] = v;
+    if (v !== null) state[key] = v;
   }
+  const sectors = params.get('sectors');
+  if (sectors !== null) state.sectors = new Set(sectors ? sectors.split(',') : []);
+  const cap = params.get('cap');
+  if (cap !== null) state.minMarketCap = Number(cap) || 0;
   return route ?? '';
+}
+
+/**
+ * Clamps state to what the snapshot actually contains.
+ *
+ * Runs on every render, not once at boot: rerender re-reads the hash, so a
+ * correction applied only at startup is overwritten before anything renders,
+ * and a stale bookmark would show an empty screen or hang on the loader.
+ */
+function clampState() {
+  if (!['h12_1', 'h9_1', 'h6_1', 'blend'].includes(state.score)) state.score = 'h12_1';
+  if (!['raw', 'voladj'].includes(state.mode)) state.mode = 'raw';
+  const thresholds = snapshot.clusters.thresholds.map((/** @type {number} */ t) => t.toFixed(2));
+  if (!thresholds.includes(state.threshold)) {
+    state.threshold = thresholds.includes('0.65') ? '0.65' : thresholds[0];
+  }
+  const known = new Set(snapshot.columns.sectors);
+  state.sectors = new Set([...state.sectors].filter((s) => known.has(s)));
+  if (!Number.isFinite(state.minMarketCap) || state.minMarketCap < 0) state.minMarketCap = 0;
+}
+
+function queryString() {
+  const params = new URLSearchParams({ score: state.score, mode: state.mode, threshold: state.threshold });
+  if (state.sectors.size > 0) params.set('sectors', [...state.sectors].join(','));
+  if (state.minMarketCap > 0) params.set('cap', String(state.minMarketCap));
+  if (state.search) params.set('search', state.search);
+  return params.toString();
 }
 
 /** Rewrites the hash without pushing history, for control changes. */
 export function syncHash(route = '') {
-  const params = new URLSearchParams({ score: state.score, mode: state.mode, threshold: state.threshold });
-  const next = `#/${route}?${params}`;
+  const next = `#/${route}?${queryString()}`;
   if (location.hash !== next) history.replaceState(null, '', next);
 }
 
-/** Navigates to a route, pushing history so Back returns to the list. */
+/** Navigates, pushing history so Back returns to the list. */
 export function navigate(route) {
-  const params = new URLSearchParams({ score: state.score, mode: state.mode, threshold: state.threshold });
-  location.hash = `/${route}?${params}`;
+  location.hash = `/${route}?${queryString()}`;
 }
 
-/**
- * Clamps hash params to what the snapshot actually contains.
- *
- * This has to run after every parseHash, not once at boot: rerender() re-reads
- * the hash, so a correction applied only at startup is overwritten before
- * anything renders. A stale bookmark carrying a threshold or score that no
- * longer exists would otherwise render an empty screen, or throw before the
- * loading placeholder is replaced and leave the page stuck on it.
- */
-function clampState() {
-  if (!snapshot.views[viewKey()]) {
-    state.score = 'h12_1';
-    state.mode = 'raw';
-  }
-  const available = Object.keys(snapshot.views[viewKey()].groups);
-  if (!available.includes(state.threshold)) {
-    state.threshold = available.includes('0.65') ? '0.65' : available[0];
-  }
-}
-
-export function rerender() {
+export function rerender({ keepScroll = false } = {}) {
   const route = parseHash();
   clampState();
-  window.scrollTo(0, 0);
-  if (route && route !== '') {
-    renderTicker(app, snapshot, decodeURIComponent(route));
-  } else {
-    renderList(app, snapshot);
-  }
+  const y = window.scrollY;
+  if (route && route !== '') renderTicker(app, snapshot, decodeURIComponent(route));
+  else renderList(app);
+  window.scrollTo(0, keepScroll ? y : 0);
 }
 
 async function boot() {
@@ -101,7 +163,8 @@ async function boot() {
       Run <code>npm run screen</code> to generate <code>web/data/snapshot.json</code>.</p>`;
     return;
   }
-  window.addEventListener('hashchange', rerender);
+  rows = buildRows(snapshot);
+  window.addEventListener('hashchange', () => rerender());
   rerender();
 }
 
