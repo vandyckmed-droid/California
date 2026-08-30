@@ -7,36 +7,54 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+  pull_request:
 
 concurrency:
-  group: momentum-screen
+  group: momentum-screen-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  screen:
+  # Runs on every event, including pull requests, so a PR gets a real check.
+  # Needs no credentials: the tests are pure and never touch the network.
+  validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-
       - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
 
-      - name: Typecheck and test
-        run: |
-          npm run typecheck
-          npm test
+  # Refreshing the snapshot and publishing are skipped on pull requests: they
+  # need the FMP key and write access, which a PR build should not carry.
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
 
-      # Only the scheduled/manual runs need live data; a push can rebuild the
-      # page from the snapshot already in the repo.
+      - uses: actions/setup-node@v4
+        if: github.event_name != 'push'
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+        if: github.event_name != 'push'
+
+      # A push to main republishes the snapshot already in the repo; only the
+      # scheduled and manual runs fetch fresh data.
       - name: Refresh snapshot
         if: github.event_name != 'push'
         env:
