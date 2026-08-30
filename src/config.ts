@@ -57,6 +57,19 @@ export const VOL_FLOOR_ANNUALIZED = 0.175;
 export const WINSOR_LOWER_PCT = 0.01;
 export const WINSOR_UPPER_PCT = 0.99;
 export const BLEND_WEIGHT = 1 / 3;
+/**
+ * Decimal places z-scores are rounded to.
+ *
+ * The rounding happens inside the normalization, not on the way out, so the
+ * pipeline ranks from exactly the numbers the browser receives. Rounding only
+ * at serialization time would let the two disagree: measured on real data,
+ * even five decimal places reorders one of the eight views relative to full
+ * precision, because names separated by less than half a unit in the last
+ * place fall back on the symbol tie-break. Four decimals is far below any
+ * meaningful difference in a unit-variance score, and being the single source
+ * of truth is worth more than the discarded digits.
+ */
+export const Z_DECIMALS = 4;
 
 // ---------------------------------------------------------------------------
 // Correlation grouping

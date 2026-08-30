@@ -1,4 +1,4 @@
-import { WINSOR_LOWER_PCT, WINSOR_UPPER_PCT } from '../config.ts';
+import { WINSOR_LOWER_PCT, WINSOR_UPPER_PCT, Z_DECIMALS } from '../config.ts';
 import { percentileSorted, sampleStdDev } from './stats.ts';
 
 /**
@@ -43,5 +43,8 @@ export function zScore(values: readonly number[]): number[] {
  * it only affects how horizons combine.
  */
 export function crossSectionalNormalize(values: readonly number[]): number[] {
-  return zScore(winsorize(values));
+  // Rounded here rather than at serialization so the pipeline ranks from the
+  // same numbers it ships, and the two can never disagree.
+  const f = 10 ** Z_DECIMALS;
+  return zScore(winsorize(values)).map((v) => Math.round(v * f) / f);
 }

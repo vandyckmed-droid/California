@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -19,8 +19,11 @@ import { alignToCalendar, buildMasterCalendar, type AlignedSeries } from './pipe
 import { completeLinkageGroups, type Group } from './pipeline/cluster.ts';
 import { correlationMatrix, windowReturns } from './pipeline/correlation.ts';
 import { computeMetrics, type IneligibleReason, type StockMetrics } from './pipeline/momentum.ts';
+import { simpleReturns } from './pipeline/stats.ts';
 import { buildViews } from './pipeline/score.ts';
 import { buildSnapshot } from './pipeline/snapshot.ts';
+import { buildUniverseClusters } from './pipeline/universeClusters.ts';
+import { encodeCorrelationSeries, encodeDisplaySeries } from './pipeline/series.ts';
 import { buildUniverse } from './pipeline/universe.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -168,6 +171,28 @@ async function main(): Promise<void> {
   log('scoring all eight views');
   const views = buildViews(metrics);
 
+  // The charted span covers the longest horizon through the latest session, so
+  // the detail screen can draw every horizon window on one line.
+  const chartFrom = L - MAX_LOOKBACK;
+  const chartDates = calendar.slice(chartFrom, L + 1);
+  const corrFrom = L - CORR_WINDOW;
+
+  const closesFor = (symbol: string, from: number): number[] => {
+    const series = aligned.get(symbol) as AlignedSeries;
+    const out: number[] = [];
+    for (let i = from; i <= L; i++) out.push(series.closes[i] as number);
+    return out;
+  };
+
+  log('correlating the full universe for cluster ids');
+  const corrStarted = Date.now();
+  const universeReturns = metrics.map((m) => simpleReturns(closesFor(m.symbol, corrFrom)));
+  const clusters = buildUniverseClusters(metrics.map((m) => m.symbol), universeReturns);
+  log(
+    `  ${((Date.now() - corrStarted) / 1000).toFixed(1)}s; groups per threshold ` +
+      `${JSON.stringify(clusters.groupCounts)}, largest ${JSON.stringify(clusters.largest)}`,
+  );
+
   log('computing correlations and grouping each view');
   const groupsByView = new Map<ViewId, Map<number, Group[]>>();
   const ungroupedByView = new Map<ViewId, string[]>();
@@ -216,48 +241,61 @@ async function main(): Promise<void> {
     ungroupedByView.set(id, ungrouped);
   }
 
+  // The per-view grouping above is no longer shipped — the browser derives it
+  // from the selection. It is still computed because it is what the invariant
+  // check runs against, and those invariants are cheap insurance on the
+  // scoring and clustering the whole product rests on.
   assertInvariants(views, groupsByView);
-
-  // The charted span covers the longest horizon through the latest session, so
-  // the detail screen can draw every horizon window on one line.
-  const chartFrom = L - MAX_LOOKBACK;
-  const chartDates = calendar.slice(chartFrom, L + 1);
-  const chartSeries = new Map<string, number[]>();
-  for (const m of metrics) {
-    const series = aligned.get(m.symbol);
-    if (!series) continue;
-    const closes: number[] = [];
-    for (let i = chartFrom; i <= L; i++) closes.push(series.closes[i] as number);
-    chartSeries.set(m.symbol, closes);
-  }
 
   const snapshot = buildSnapshot({
     asOf,
-    chartSeries,
     chartDates,
     calendarLength: calendar.length,
     anchors,
     members: memberBySymbol,
     metrics,
-    views,
-    groupsByView,
-    ungroupedByView,
+    clusters,
     screenedCount: universe.screenedCount,
     afterStaticExclusions: universe.members.length,
     exclusions: { ...universe.exclusions, ...ineligible },
     excludedSamples: universe.excludedSamples as Record<string, string[]>,
   });
 
-  const out = resolve(ROOT, 'web/data/snapshot.json');
-  const archive = resolve(ROOT, `web/data/archive/${asOf}.json`);
+  const dataDir = resolve(ROOT, 'web/data');
+  const seriesDir = resolve(dataDir, 'series');
+  mkdirSync(dataDir, { recursive: true });
+  // Rebuilt from scratch so a name leaving the universe does not leave a stale
+  // file behind for the site to serve.
+  rmSync(seriesDir, { recursive: true, force: true });
+  mkdirSync(seriesDir, { recursive: true });
+
+  log(`writing ${metrics.length} per-symbol series files`);
+  let seriesBytes = 0;
+  let largestSeries = 0;
+  for (const m of metrics) {
+    // Two grades, because a chart and a correlation are not the same problem.
+    // The display series is never an input to a calculation; the correlation
+    // block is the only series a correlation may be derived from.
+    const file = JSON.stringify({
+      symbol: m.symbol,
+      display: encodeDisplaySeries(closesFor(m.symbol, chartFrom)),
+      correlation: encodeCorrelationSeries(closesFor(m.symbol, corrFrom)),
+    });
+    seriesBytes += file.length;
+    if (file.length > largestSeries) largestSeries = file.length;
+    writeFileSync(resolve(seriesDir, `${m.symbol}.json`), file);
+  }
+
+  const out = resolve(dataDir, 'snapshot.json');
   const json = JSON.stringify(snapshot);
-  mkdirSync(dirname(out), { recursive: true });
-  mkdirSync(dirname(archive), { recursive: true });
   writeFileSync(out, json);
-  writeFileSync(archive, json);
 
   const meta = snapshot.meta as { dataHash: string };
-  log(`wrote ${out} (${(json.length / 1024).toFixed(0)} KB)`);
+  log(`wrote snapshot.json (${(json.length / 1024).toFixed(0)} KB)`);
+  log(
+    `wrote series/ (${metrics.length} files, ${(seriesBytes / 1024).toFixed(0)} KB total, ` +
+      `largest ${largestSeries} B)`,
+  );
   log(`dataHash ${meta.dataHash}`);
 }
 
