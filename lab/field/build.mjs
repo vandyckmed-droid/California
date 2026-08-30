@@ -266,3 +266,73 @@ fs.writeFileSync(`${OUT}/mock-history.json`, JSON.stringify({
   days: DAYS_H, names: history,
 }));
 console.log('  mock-history.json (INVENTED DATA, final session real)');
+
+/* ---- threshold dial: how long does each group survive the sweep? ------------
+   Complete linkage at 41 thresholds from 0.50 to 0.90 over a fixed subset, then
+   each distinct member-set is tracked across the sweep. A set that exists over a
+   wide band of rho is structure; one that appears at 0.62 and is gone by 0.66 is
+   an artefact of where the line happened to be drawn.
+
+   Computed over a subset rather than the universe because the point is legible
+   persistence, not coverage: 2,572 names produce a barcode no one can read, and
+   the sweep is O(n^3) per threshold.                                           */
+const { correlationMatrix, completeLinkageGroups } = await import(`${ROOT}/web/lib/quant.js`);
+
+const DIAL_N = 220;
+const dialIdx = orderRank.slice(0, DIAL_N);
+const dialRets = dialIdx.map((i) => rets[i].slice(0, DAYS));
+const dialC = correlationMatrix(dialRets);
+const STEPS = [];
+for (let t = 50; t <= 90; t++) STEPS.push(Math.round(t) / 100);
+
+/** key -> { members, first, last, sizes } across the sweep */
+const lifetimes = new Map();
+const perStep = STEPS.map((thr) => {
+  const groups = completeLinkageGroups(dialC, thr).filter((g) => g.members.length > 1);
+  for (const g of groups) {
+    const key = g.members.join(',');
+    if (!lifetimes.has(key)) {
+      lifetimes.set(key, { members: g.members, lo: thr, hi: thr });
+    } else {
+      lifetimes.get(key).hi = thr;
+    }
+  }
+  return { thr, n: groups.length, grouped: groups.reduce((a, g) => a + g.members.length, 0) };
+});
+
+const bars = [...lifetimes.values()]
+  .map((L) => ({
+    m: L.members, lo: L.lo, hi: L.hi, span: Math.round((L.hi - L.lo) * 100) / 100,
+    size: L.members.length,
+    best: Math.min(...L.members.map((k) => R.bl[dialIdx[k]])),
+  }))
+  .filter((b) => b.span >= 0.01)
+  .sort((a, b) => b.span - a.span || a.best - b.best);
+
+fs.writeFileSync(`${OUT}/dial.json`, JSON.stringify({
+  steps: STEPS, perStep,
+  names: dialIdx.map((i) => ({ s: c.symbol[i], r: R.bl[i], sec: c.sector[i] })),
+  bars: bars.slice(0, 64),
+  sectors: c.sectors,
+}));
+console.log(`  dial.json  ${bars.length} distinct groups across the sweep, ` +
+  `longest-lived spans rho ${bars[0].lo}-${bars[0].hi}`);
+
+/* ---- gravity basket -------------------------------------------------------- */
+const BASKET = ['MU', 'STX', 'WDC', 'SNDK', 'AMAT', 'LRCX', 'ICHR', 'UCTT',
+  'IREN', 'CIFR', 'HUT', 'RIOT', 'AEM', 'NEM', 'PAAS', 'AGI',
+  'ORKA', 'DFTX', 'ATEX', 'CLMT', 'DELL', 'NTAP', 'MXL', 'INTC'];
+const bIdx = BASKET.map((s) => bySym.get(s)).filter((i) => i !== undefined);
+const bRets = bIdx.map((i) => rets[i].slice(0, DAYS));
+const bC = correlationMatrix(bRets);
+fs.writeFileSync(`${OUT}/basket.json`, JSON.stringify({
+  syms: bIdx.map((i) => c.symbol[i]),
+  meta: bIdx.map((i) => ({
+    s: c.symbol[i], r: R.bl[i], sec: c.sector[i],
+    rvT: Math.round(c.rvT[i] * 1000) / 1000,
+    cap: Math.round(c.marketCapM[i]),
+  })),
+  m: bC.map((row) => row.map((v) => Math.round(v * 1000) / 1000)),
+  sectors: c.sectors,
+}));
+console.log(`  basket.json  ${bIdx.length} names`);

@@ -519,3 +519,313 @@ export function river(host, mock) {
   addEventListener('resize', paint, { passive: true });
   return wrap;
 }
+
+/* ========================================================== 6. THRESHOLD DIAL */
+/**
+ * How much of the grouping is structure and how much is where the line was drawn.
+ *
+ * The product offers three thresholds and treats them as three settings. Swept
+ * continuously instead, each distinct member-set has a *lifetime* — the band of
+ * rho over which it exists unchanged. Drawn as a barcode, a long bar is a group
+ * that would survive any reasonable choice; a short one is an artefact.
+ *
+ * This is a persistence diagram, borrowed from topology, and it is the only
+ * drawing here that treats a parameter as a dimension rather than a control.
+ */
+export function dial(host, data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'proto';
+  wrap.innerHTML = `
+    <div class="proto-ctrl">
+      <label class="dialer">
+        <span>&rho;</span>
+        <input type="range" id="rho" min="50" max="90" value="65" step="1">
+        <output id="rho-out" class="mono">0.65</output>
+      </label>
+      <span class="proto-hint" id="dial-hint"></span>
+    </div>
+    <canvas id="dial" width="1260" height="600"></canvas>
+    <div class="dial-list" id="dial-list"></div>`;
+  host.append(wrap);
+  const cv = wrap.querySelector('#dial');
+  const sl = wrap.querySelector('#rho');
+  const out = wrap.querySelector('#rho-out');
+  const hint = wrap.querySelector('#dial-hint');
+  const list = wrap.querySelector('#dial-list');
+  let thr = 0.65;
+
+  const bars = data.bars;
+  const nameAt = (k) => data.names[k];
+
+  function paint() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const W = cv.clientWidth || 900, H = 600;
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cs = getComputedStyle(document.documentElement);
+    const tok = (k) => cs.getPropertyValue(k).trim();
+    g.clearRect(0, 0, W, H);
+
+    const padL = 118, padR = 16, padT = 30, padB = 34;
+    const iw = W - padL - padR, ih = H - padT - padB;
+    const x = (r) => padL + ((r - 0.5) / 0.4) * iw;
+    const rowH = ih / bars.length;
+
+    // rho grid
+    g.font = '10px ui-monospace, monospace';
+    for (let r = 0.5; r <= 0.9001; r += 0.05) {
+      const isSet = Math.abs(r - 0.6) < 1e-9 || Math.abs(r - 0.65) < 1e-9 || Math.abs(r - 0.7) < 1e-9;
+      g.strokeStyle = isSet ? tok('--border-strong') : tok('--rule2') || tok('--border');
+      g.lineWidth = 1;
+      g.setLineDash(isSet ? [] : [2, 3]);
+      g.beginPath(); g.moveTo(x(r), padT - 8); g.lineTo(x(r), H - padB + 2); g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = isSet ? tok('--text') : tok('--faint');
+      g.textAlign = 'center';
+      g.fillText(r.toFixed(2), x(r), padT - 13);
+    }
+    g.textAlign = 'left';
+    g.fillStyle = tok('--faint');
+    g.fillText('the three thresholds the product ships are the solid lines', padL, H - 8);
+
+    bars.forEach((b, i) => {
+      const y = padT + i * rowH;
+      const h = Math.max(1.4, rowH - 1.2);
+      const live = thr >= b.lo && thr <= b.hi;
+      // Lightness is span: robust groups are solid, fragile ones nearly ghosts.
+      const strength = Math.min(1, b.span / 0.22);
+      g.fillStyle = live
+        ? `hsl(${hue(nameAt(b.m[0]).sec)} 58% ${44 + (1 - strength) * 22}%)`
+        : tok('--border');
+      g.globalAlpha = live ? 1 : 0.35 + strength * 0.3;
+      g.fillRect(x(b.lo), y, Math.max(2, x(b.hi) - x(b.lo)), h);
+      g.globalAlpha = 1;
+      // Label only the rows worth reading. Seventy-six labels in 600px collide
+      // into a grey smear, and the ones that matter are the bars alive under the
+      // dial — the rest are context, and context does not need naming.
+      if (live && rowH > 5.5) {
+        g.fillStyle = tok('--text');
+        g.font = '600 9.5px ui-monospace, monospace';
+        g.textAlign = 'right';
+        const label = b.m.slice(0, 2).map((k) => nameAt(k).s).join(' ') +
+          (b.size > 2 ? ` +${b.size - 2}` : '');
+        g.fillText(label.slice(0, 17), padL - 6, y + h / 2 + 3);
+        g.textAlign = 'left';
+      }
+    });
+
+    // the dial itself
+    g.strokeStyle = tok('--accent-strong'); g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x(thr), padT - 8); g.lineTo(x(thr), H - padB + 2); g.stroke();
+
+    const liveBars = bars.filter((b) => thr >= b.lo && thr <= b.hi);
+    const robust = liveBars.filter((b) => b.span >= 0.1).length;
+    hint.textContent =
+      `${liveBars.length} groups at this threshold · ${robust} of them survive a 0.10-wide sweep`;
+
+    list.replaceChildren();
+    liveBars.slice(0, 10).forEach((b) => {
+      const d = document.createElement('div');
+      d.className = 'dial-row' + (b.span >= 0.1 ? ' robust' : '');
+      d.innerHTML =
+        `<b>${b.m.map((k) => nameAt(k).s).join(' · ')}</b>` +
+        `<span>&rho; ${b.lo.toFixed(2)}–${b.hi.toFixed(2)}` +
+        `${b.span >= 0.1 ? ' · robust' : ' · fragile'}</span>`;
+      list.append(d);
+    });
+  }
+
+  sl.addEventListener('input', () => {
+    thr = Number(sl.value) / 100;
+    out.textContent = thr.toFixed(2);
+    paint();
+  });
+  paint();
+  addEventListener('resize', paint, { passive: true });
+  return wrap;
+}
+
+/* ========================================================== 7. GRAVITY BASKET */
+/**
+ * A basket that arranges itself.
+ *
+ * Every selected name is a body. Pairs pull on each other with a force
+ * proportional to how far their correlation clears the threshold, and everything
+ * repels everything else. Left alone the basket settles into clumps, and the
+ * number of clumps is the number of distinct bets — arrived at physically rather
+ * than asserted as a statistic.
+ *
+ * The interaction that matters is adding a name: it either flies into an
+ * existing clump, which is the duplicate-bet warning, or it settles in open
+ * space, which is the only visual the product has ever had for "this is new".
+ */
+export function basket(host, data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'proto';
+  wrap.innerHTML = `
+    <div class="proto-ctrl">
+      <label class="dialer">
+        <span>&rho;</span>
+        <input type="range" id="brho" min="45" max="85" value="60" step="1">
+        <output id="brho-out" class="mono">0.60</output>
+      </label>
+      <div class="seg" role="group" aria-label="Size">
+        <button type="button" data-z="equal" aria-pressed="true">equal weight</button>
+        <button type="button" data-z="cap" aria-pressed="false">size = market cap</button>
+      </div>
+      <button type="button" class="reheat" id="reheat">shake</button>
+    </div>
+    <canvas id="basket" width="1260" height="600"></canvas>
+    <p class="proto-hint" id="b-hint"></p>`;
+  host.append(wrap);
+  const cv = wrap.querySelector('#basket');
+  const hint = wrap.querySelector('#b-hint');
+  const sl = wrap.querySelector('#brho');
+  const out = wrap.querySelector('#brho-out');
+  let thr = 0.60, sizeMode = 'equal', raf = 0;
+
+  const N = data.syms.length;
+  const nodes = data.syms.map((s, i) => ({
+    s, i, sec: data.meta[i].sec, r: data.meta[i].r, cap: data.meta[i].cap,
+    x: 0, y: 0, vx: 0, vy: 0,
+  }));
+
+  function seed() {
+    nodes.forEach((n, i) => {
+      const a = (i / N) * Math.PI * 2;
+      n.x = Math.cos(a) * 190 + (Math.random() - 0.5) * 24;
+      n.y = Math.sin(a) * 150 + (Math.random() - 0.5) * 24;
+      n.vx = 0; n.vy = 0;
+    });
+  }
+  seed();
+
+  /** Connected components at the current threshold: the clump count. */
+  function components() {
+    const seen = new Array(N).fill(-1);
+    let c = 0;
+    for (let i = 0; i < N; i++) {
+      if (seen[i] >= 0) continue;
+      const stack = [i]; seen[i] = c;
+      while (stack.length) {
+        const a = stack.pop();
+        for (let b = 0; b < N; b++) {
+          if (seen[b] < 0 && data.m[a][b] >= thr) { seen[b] = c; stack.push(b); }
+        }
+      }
+      c++;
+    }
+    return { label: seen, count: c };
+  }
+
+  function radius(n) {
+    return sizeMode === 'equal' ? 15
+      : 9 + Math.min(26, Math.sqrt(Math.max(1, n.cap)) / 26);
+  }
+
+  function step() {
+    for (let a = 0; a < N; a++) {
+      const A = nodes[a];
+      for (let b = a + 1; b < N; b++) {
+        const B = nodes[b];
+        let dx = B.x - A.x, dy = B.y - A.y;
+        let d = Math.hypot(dx, dy) || 0.01;
+        const ux = dx / d, uy = dy / d;
+        // Attraction only above the line, and proportional to how far above.
+        const rho = data.m[a][b];
+        const pull = rho >= thr ? (rho - thr) * 0.9 : 0;
+        const want = pull > 0 ? 46 : 150;
+        // Repulsion keeps unrelated names apart and stops clumps collapsing.
+        const rep = 1600 / (d * d);
+        const f = pull * (d - want) * 0.0016 - rep;
+        A.vx += ux * f; A.vy += uy * f;
+        B.vx -= ux * f; B.vy -= uy * f;
+      }
+      // Weak centring so the basket does not drift off frame.
+      A.vx -= A.x * 0.0042; A.vy -= A.y * 0.0042;
+      A.vx *= 0.86; A.vy *= 0.86;
+      A.x += A.vx; A.y += A.vy;
+    }
+  }
+
+  function paint() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const W = cv.clientWidth || 900, H = 600;
+    if (cv.width !== Math.round(W * dpr)) {
+      cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
+    }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cs = getComputedStyle(document.documentElement);
+    const tok = (k) => cs.getPropertyValue(k).trim();
+    g.clearRect(0, 0, W, H);
+    g.save();
+    g.translate(W / 2, H / 2);
+
+    const { label, count } = components();
+
+    // bonds
+    for (let a = 0; a < N; a++) for (let b = a + 1; b < N; b++) {
+      const rho = data.m[a][b];
+      if (rho < thr) continue;
+      const A = nodes[a], B = nodes[b];
+      g.strokeStyle = tok('--accent-strong');
+      g.globalAlpha = 0.14 + Math.min(1, (rho - thr) / 0.3) * 0.5;
+      g.lineWidth = 0.7 + Math.min(1, (rho - thr) / 0.3) * 2.6;
+      g.beginPath(); g.moveTo(A.x, A.y); g.lineTo(B.x, B.y); g.stroke();
+    }
+    g.globalAlpha = 1;
+
+    for (const n of nodes) {
+      const rr = radius(n);
+      const solo = label.filter((l) => l === label[n.i]).length === 1;
+      g.beginPath(); g.arc(n.x, n.y, rr, 0, 7);
+      g.fillStyle = solo ? tok('--surface') : `hsl(${hue(n.sec)} 52% 48%)`;
+      g.fill();
+      g.strokeStyle = solo ? tok('--border-strong') : 'rgba(0,0,0,.22)';
+      g.lineWidth = solo ? 1.6 : 1;
+      g.stroke();
+      g.fillStyle = solo ? tok('--muted') : '#fff';
+      g.font = `600 ${Math.max(8.5, Math.min(11, rr * 0.72))}px ui-monospace, monospace`;
+      g.textAlign = 'center';
+      g.fillText(n.s, n.x, n.y + 3.5);
+    }
+    g.textAlign = 'left';
+    g.restore();
+
+    const solos = [...new Set(label)].filter((c) =>
+      label.filter((l) => l === c).length === 1).length;
+    hint.innerHTML = `<b>${N} names → ${count} distinct bets</b> at &rho; &ge; ${thr.toFixed(2)}` +
+      ` · ${solos} of them stand alone · the clumps are the duplicate bets`;
+  }
+
+  function loop() {
+    step(); paint();
+    raf = requestAnimationFrame(loop);
+  }
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { for (let k = 0; k < 400; k++) step(); paint(); }
+  else loop();
+
+  sl.addEventListener('input', () => {
+    thr = Number(sl.value) / 100;
+    out.textContent = thr.toFixed(2);
+    // A threshold change is a change of physics, so let it re-settle visibly.
+    nodes.forEach((n) => { n.vx += (Math.random() - .5) * 3; n.vy += (Math.random() - .5) * 3; });
+    if (reduced) { for (let k = 0; k < 400; k++) step(); paint(); }
+  });
+  wrap.querySelectorAll('.seg button').forEach((b) => {
+    b.addEventListener('click', () => {
+      sizeMode = b.dataset.z;
+      wrap.querySelectorAll('.seg button')
+        .forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+      if (reduced) paint();
+    });
+  });
+  wrap.querySelector('#reheat').addEventListener('click', () => {
+    seed();
+    if (reduced) { for (let k = 0; k < 400; k++) step(); paint(); }
+  });
+  return wrap;
+}

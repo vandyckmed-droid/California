@@ -3,6 +3,17 @@
 Experimental work. **Nothing here is loaded by the product.** `web/` is untouched;
 this directory only reads `web/data/`.
 
+> **This is a design laboratory, not a feature branch.** It is not expected to
+> merge into the product wholesale, and it is not kept permanently
+> merge-ready. Main advances independently; older prototypes here are historical
+> snapshots of the product at the time they were drawn, and are allowed to go
+> stale.
+>
+> The durable output is `concepts/` — portable packets written to survive this
+> branch. If a prototype here stops matching main, **preserve the concept and
+> let the prototype rot.** To graduate an idea, start from the latest main and
+> open a fresh branch; see `concepts/README.md`.
+
 The lab puts the live product and a concept side by side at a 390 x 844 phone
 viewport. The baseline pane is the real app in an iframe, unmodified, so it can
 never drift from what actually ships.
@@ -40,6 +51,8 @@ than five ways of decorating a row. Same server, `http://localhost:5173/lab/fiel
 | 3 | Telescope | one chart, three horizons | real |
 | 4 | Broadsheet | top 100 as pure type | real |
 | 5 | Rank river | 20 paths over 60 sessions | **invented, flagged in the UI** |
+| 6 | Threshold dial | group lifetimes across a rho sweep | real |
+| 7 | Gravity basket | 24 names as a force simulation | real |
 
 `node lab/field/build.mjs` regenerates everything in `lab/field/data/` from the
 committed snapshot. The twenty-concept field the five were chosen from is in

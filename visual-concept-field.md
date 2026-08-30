@@ -13,6 +13,9 @@ most of the interesting questions about a ranked list are not about a row.
 
 ## Built (`lab/field/`)
 
+> Five drawn in the first field round, two more added after review picked a
+> shortlist. Packets for the five shortlisted concepts are in `concepts/`.
+
 **1 · Spectrogram.** 2,572 rows, 126 columns, one pixel per name-session,
 brightness what that name did that day standardised by its own volatility.
 Overview plus a 44-row lens. Sorted by correlation group, the 28 gold miners are
@@ -49,10 +52,10 @@ at twenty names. It would be mud at a hundred.
 
 ## Sketched
 
-**6 · Threshold dial.** One continuous control from ρ 0.50 to 0.90 that reforms
-every group live. What you are looking for is not a number but *stability* — the
-groups that survive the whole sweep are real structure; the ones that appear at
-0.62 and vanish at 0.66 are an artefact of where the line was drawn.
+**6 · Threshold dial.** *Built — see `concepts/threshold-dial/`.* Swept
+continuously, each member-set has a lifetime, drawn as a persistence barcode.
+76 distinct sets across ρ 0.50–0.90; `HUT · CIFR` survives 0.50–0.76, and 4 of
+the 21 groups the product shows at 0.65 do not survive a 0.10-wide band.
 
 **7 · The seam.** Two names, one log-time chart, their price paths overlaid and
 the gap between them shaded. "Why are these grouped" answered as a picture. The
@@ -98,9 +101,10 @@ every row. Needs history.
 **17 · Drift field.** Volatility against momentum with every name a short vector
 pointing where it is heading. A weather map of the cross-section.
 
-**18 · Gravity basket.** Drag names in; correlated ones visibly attract and clump.
-The number of clumps *is* the distinct-trades count, arrived at physically rather
-than stated. The most promising of the unbuilt interaction ideas.
+**18 · Gravity basket.** *Built — see `concepts/gravity-basket/`.* A force
+simulation over the selection: bonded pairs pull, everything else repels, and the
+settled clumps are the distinct bets. 24 names → 7 bets at ρ 0.60, four of them
+standing alone.
 
 **19 · Empty ground.** Your holdings lit on the territories map, and the question
 inverted: not "is this crowded" but *"which territories do you have no exposure

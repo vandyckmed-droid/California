@@ -1,4 +1,5 @@
-import { spectrogram, territories, telescope, broadsheet, river } from './prototypes.js';
+import { spectrogram, territories, telescope, broadsheet, river, dial, basket }
+  from './prototypes.js';
 
 const stage = document.getElementById('stage');
 const tabsEl = document.getElementById('tabs');
@@ -29,6 +30,19 @@ const BLURB = {
     names share its correlation group. No axes, no chart, no colour carrying meaning alone.
     <span class="q">A claim that a ranked list is an editorial object — a front page — rather than
     a table that happens to be sorted.</span>`,
+  dial: `<b>How much of the grouping is structure, and how much is where the line was drawn.</b>
+    The product ships three thresholds and treats them as three settings. Swept continuously from
+    &rho; 0.50 to 0.90, each distinct member-set has a <b>lifetime</b> — the band over which it
+    exists unchanged. A long bar would survive any reasonable choice. A short one appeared at 0.62
+    and was gone by 0.66.
+    <span class="q">A persistence diagram, borrowed from topology. The only drawing here that
+    treats a parameter as a dimension rather than a control.</span>`,
+  basket: `<b>A basket that arranges itself.</b> Every selected name is a body; pairs pull on each
+    other in proportion to how far their correlation clears the line, and everything repels
+    everything else. Left alone it settles into clumps, and <b>the number of clumps is the number
+    of distinct bets</b> — arrived at physically rather than asserted as a statistic.
+    <span class="q">The move that matters is adding a name: it either flies into an existing clump,
+    which is the duplicate-bet warning, or it settles in open space.</span>`,
   river: `<b>Where the leaders have been.</b> Twenty paths converging on today, with the two
     arrivals and two collapses drawn heavier. Invented data, on purpose — the question this
     answers is not what the market did, it is <b>whether a braid can carry an arrival story
@@ -70,6 +84,21 @@ const NOTES = {
   ],
 };
 
+const NOTES_EXTRA = {
+  dial: [
+    ['Real data', 'Complete linkage at 41 thresholds over the top 220 names, from the correlation-grade returns the product already ships.'],
+    ['What it found', '<b>76 distinct member-sets across the sweep.</b> The longest-lived spans &rho; 0.50 to 0.76 — a 0.26-wide band, structure that no reasonable threshold would miss.'],
+    ['Why a subset', 'The point is legible persistence, not coverage. 2,572 names make a barcode nobody can read, and the sweep is O(n³) per step.'],
+    ['The uncomfortable part', 'Some groups the product shows at 0.65 have lifetimes narrower than 0.03. They are not wrong — they are just <b>a consequence of the dial position</b>, and nothing on the current screen says which is which.'],
+  ],
+  basket: [
+    ['Real data', '24 names spanning memory, semicap, miners, gold and four solos; real 126-session correlations.'],
+    ['Not a layout, a simulation', 'No clustering runs here. The clumps are an emergent property of the forces, so what you see is the correlation structure rather than a drawing of it.'],
+    ['Reads without a legend', 'Hollow circles stand alone. Filled ones are in a clump. Thick bonds are tight pairs. Nothing needs a key.'],
+    ['Where it goes', 'Dragging a candidate in from the ranked list and watching where it lands is the whole feature. That is the interaction to prototype next.'],
+  ],
+};
+
 const TABS = [
   ['spectro', 'Spectrogram', async () => {
     const idx = await get('data/spectro-index.json');
@@ -91,7 +120,16 @@ const TABS = [
     const d = await get('data/mock-history.json');
     return (h) => river(h, d);
   }],
+  ['dial', 'Threshold dial', async () => {
+    const d = await get('data/dial.json');
+    return (h) => dial(h, d);
+  }],
+  ['basket', 'Gravity basket', async () => {
+    const d = await get('data/basket.json');
+    return (h) => basket(h, d);
+  }],
 ];
+Object.assign(NOTES, NOTES_EXTRA);
 
 async function show(key) {
   const t = TABS.find((x) => x[0] === key) ?? TABS[0];
