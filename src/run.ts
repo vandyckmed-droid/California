@@ -21,7 +21,7 @@ import type { History } from './fmp/types.ts';
 import { alignToCalendar, buildMasterCalendar, type AlignedSeries } from './pipeline/calendar.ts';
 import { completeLinkageGroups, type Group } from './pipeline/cluster.ts';
 import { correlationMatrix, windowReturns } from './pipeline/correlation.ts';
-import { buildRankHistory } from './pipeline/rankHistory.ts';
+import { buildRankHistory, sessionRanks } from './pipeline/rankHistory.ts';
 import { ranksFor, scoresFor } from '../web/lib/model.js';
 import { computeMetrics, type IneligibleReason, type StockMetrics } from './pipeline/momentum.ts';
 import { simpleReturns } from './pipeline/stats.ts';
@@ -342,24 +342,21 @@ function writeRankHistory(
     const history = buildRankHistory(symbols, aligned, calendar, L);
     const cols = (snapshot as { columns: { symbol: string[] } }).columns;
 
-    // Gate 1 — identity at k=0.
-    const last = history.sessions.length - 1;
+    // Gate 1 — identity at k=0, over the whole cross-section rather than only
+    // the twenty per view the sidecar keeps.
+    const latest = sessionRanks(symbols, aligned, L);
     let checked = 0;
     for (const score of SCORE_KEYS) {
       for (const mode of MODES) {
         const id = viewId(score, mode);
         const live = ranksFor(scoresFor(snapshot, score, mode), cols.symbol) as number[];
-        const bySymbol = new Map<string, number>();
-        cols.symbol.forEach((sym, i) => bySymbol.set(sym, live[i] as number));
-        const view = history.views[id];
-        if (!view) throw new Error(`rank history is missing the ${id} view`);
-        view.symbols.forEach((sym, n) => {
-          const backfilled = view.ranks[n]?.[last];
-          const shipped = bySymbol.get(sym);
-          if (backfilled !== shipped) {
-            throw new Error(
-              `${id} ${sym}: backfilled #${backfilled} but the snapshot ranks it #${shipped}`,
-            );
+        const backfilled = latest.get(id);
+        if (!backfilled) throw new Error(`rank history is missing the ${id} view`);
+        cols.symbol.forEach((sym, i) => {
+          const got = backfilled.get(sym);
+          const want = live[i];
+          if (got !== want) {
+            throw new Error(`${id} ${sym}: backfilled #${got} but the snapshot ranks it #${want}`);
           }
           checked++;
         });

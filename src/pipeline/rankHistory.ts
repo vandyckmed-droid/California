@@ -150,6 +150,25 @@ function ranksForSession(cols: SessionColumns): Map<ViewId, Map<string, number>>
 }
 
 /**
+ * Every name's rank in one session, per view.
+ *
+ * Exported so the pipeline's identity gate can check the *whole* cross-section
+ * rather than only the twenty names per view the sidecar keeps. An indexing
+ * error would move every name at once, so twenty would catch it — but a gate
+ * that covers 2,572 costs one extra session and leaves nothing to argue about.
+ */
+export function sessionRanks(
+  symbols: readonly string[],
+  aligned: ReadonlyMap<string, AlignedSeries>,
+  L: number,
+): Map<ViewId, Map<string, number>> {
+  const closes = new Map<string, readonly (number | null)[]>();
+  for (const [symbol, series] of aligned) closes.set(symbol, series.closes);
+  const cols = columnsAt(symbols, closes, L);
+  return cols ? ranksForSession(cols) : new Map();
+}
+
+/**
  * Backfills `sessions` sessions of ranks and keeps the current top `topN` per
  * view.
  *

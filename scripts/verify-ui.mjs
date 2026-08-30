@@ -91,7 +91,13 @@ const tapAudit = (page) => page.evaluate(() => {
 });
 
 /** Every series URL the page has asked for, in order, across a whole context. */
-const newPage = async (colorScheme = 'light') => {
+/**
+ * @param colorScheme
+ * @param ignore Console errors this page is expected to produce. Only for
+ *   failures the check itself provokes — a blanket filter would hide the very
+ *   regressions this listener exists to catch.
+ */
+const newPage = async (colorScheme = 'light', ignore = null) => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme });
   page.seriesRequests = [];
   page.on('request', (r) => {
@@ -99,7 +105,11 @@ const newPage = async (colorScheme = 'light') => {
     if (m) page.seriesRequests.push(decodeURIComponent(m[1]));
   });
   page.on('pageerror', (e) => { failures.push(`pageerror: ${e.message}`); });
-  page.on('console', (m) => { if (m.type() === 'error') failures.push(`console: ${m.text()}`); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    if (ignore && ignore.test(m.text())) return;
+    failures.push(`console: ${m.text()}`);
+  });
   return page;
 };
 
@@ -533,6 +543,145 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
     r.stored.length === 1 && r.stored[0] === picks[0], r.stored.join(','));
   check('stale pick: the user is told, not left guessing',
     /ZZDELISTED/.test(r.html) && /no longer in the/i.test(r.html), 'no notice shown');
+}
+
+// ---- Labs: the experiment, and the boundary around it ----------------------
+{
+  const labs = await newPage();
+  labs.labsRequests = [];
+  labs.on('request', (r) => {
+    if (/rank-history\.json/.test(r.url())) labs.labsRequests.push(r.url());
+    if (/views\/labs\//.test(r.url())) labs.labsRequests.push('module');
+  });
+
+  // The home screen must download none of the experiment.
+  await labs.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await labs.waitForSelector('.stock');
+  check('labs: the ranked list downloads none of the experiment',
+    labs.labsRequests.length === 0, labs.labsRequests.join(', '));
+
+  const link = await labs.evaluate(() => {
+    const a = document.querySelector('.labs-link');
+    return a ? { text: a.textContent.trim(), h: a.getBoundingClientRect().height } : null;
+  });
+  check('labs: a secondary entry point exists on the list',
+    !!link && /labs/i.test(link.text), JSON.stringify(link));
+  check('labs: the entry point is not a primary tab',
+    await labs.evaluate(() => !document.querySelector('nav, [role=tablist], .tabbar')));
+
+  await labs.click('.labs-link');
+  await labs.waitForSelector('.lab .rows .stock');
+  const index = await labs.evaluate(() => ({
+    heading: document.querySelector('.head h1')?.textContent?.trim() ?? '',
+    entries: [...document.querySelectorAll('.lab .rows .sym')].map((e) => e.textContent.trim()),
+    warns: /experiments/i.test(document.querySelector('.lab-note')?.textContent ?? ''),
+  }));
+  check('labs: the index lists the experiment', index.entries.includes('Rank River'), index.entries.join(','));
+  check('labs: the index says these are experiments', index.warns, index.heading);
+
+  await labs.click('.lab .rows .stock .open');
+  await labs.waitForSelector('svg.river', { timeout: 20000 });
+  const river = await labs.evaluate(() => {
+    const trails = [...document.querySelectorAll('.river-trail')];
+    const d = (p) => p.getAttribute('d') ?? '';
+    const ys = (p) => [...d(p).matchAll(/[ML][\d.]+,([\d.]+)/g)].map((m) => Number(m[1]));
+    return {
+      trails: trails.length,
+      names: document.querySelectorAll('.river-names button').length,
+      points: trails.map((p) => ys(p).length),
+      firstY: ys(trails[0]),
+      chartH: Math.round(document.querySelector('svg.river').getBoundingClientRect().height),
+      axis: [...document.querySelectorAll('.river-axis span')].map((e) => e.textContent.trim()),
+      dates: [...document.querySelectorAll('.river-dates span')].map((e) => e.textContent.trim()),
+      caveat: document.querySelector('.lab .foot')?.textContent ?? '',
+      hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+
+  check('labs: one trail per name', river.trails === river.names && river.trails > 0,
+    `${river.trails} trails / ${river.names} names`);
+  check('labs: trails span the sessions', river.points.every((n) => n > 1) && Math.max(...river.points) >= 20,
+    river.points.join(','));
+  check('labs: the chart has real height', river.chartH > 200, `${river.chartH}px`);
+  check('labs: the axis is labelled, including the beyond-100 lane',
+    river.axis.includes('#1') && river.axis.some((t) => t.includes('>100')), river.axis.join(' '));
+  check('labs: today is the right edge', river.dates[river.dates.length - 1] === 'today', river.dates.join(' → '));
+  check('labs: it says these are backfilled ranks, not what the screen showed',
+    /backfilled/i.test(river.caveat) && /not a record/i.test(river.caveat), river.caveat.slice(0, 80));
+  check('labs: no horizontal scroll', !river.hScroll);
+  {
+    const small = await tapAudit(labs);
+    check('labs: every control is >= 44px', small.length === 0, small.join(', '));
+  }
+  check('labs: exactly one sidecar request', 
+    labs.labsRequests.filter((u) => u !== 'module').length === 1,
+    labs.labsRequests.join(', '));
+
+  // Better ranks sit higher: rank 1 must be nearer the top than rank 100.
+  const monotone = await labs.evaluate(() => {
+    const band = [...document.querySelectorAll('.river-axis span')]
+      .map((e) => ({ label: e.textContent.trim(), top: parseFloat(e.style.top) }));
+    const at = (t) => band.find((b) => b.label === t)?.top;
+    return { one: at('#1'), fifty: at('#50'), hundred: at('#100') };
+  });
+  check('labs: better ranks are drawn higher',
+    monotone.one < monotone.fifty && monotone.fifty < monotone.hundred, JSON.stringify(monotone));
+
+  // Tapping a name emphasises it and fades the rest.
+  await labs.click('.river-names button');
+  // The trails cross-fade over 120ms; reading straight after the click samples
+  // the transition mid-flight and both trails still report the base opacity.
+  await labs.waitForFunction(() => {
+    const on = document.querySelector('.river-trail.on');
+    return on && parseFloat(getComputedStyle(on).opacity) > 0.95;
+  }, null, { timeout: 5000 });
+  const focused = await labs.evaluate(() => ({
+    on: document.querySelectorAll('.river-trail.on').length,
+    off: document.querySelectorAll('.river-trail.off').length,
+    pressed: document.querySelectorAll('.river-names button[aria-pressed=true]').length,
+    onOpacity: parseFloat(getComputedStyle(document.querySelector('.river-trail.on')).opacity),
+    offOpacity: parseFloat(getComputedStyle(document.querySelector('.river-trail.off')).opacity),
+  }));
+  check('labs: tapping a name emphasises exactly one trail',
+    focused.on === 1 && focused.pressed === 1 && focused.off === river.trails - 1,
+    JSON.stringify(focused));
+  check('labs: the others actually fade', focused.offOpacity < focused.onOpacity / 2,
+    `${focused.onOpacity} vs ${focused.offOpacity}`);
+
+  await labs.click('.river-names button[aria-pressed=true]');
+  const cleared = await labs.evaluate(() => document.querySelectorAll('.river-trail.off').length);
+  check('labs: tapping again clears the emphasis', cleared === 0, String(cleared));
+
+  // It follows the view the list is on, rather than pinning to 12-1.
+  const perView = {};
+  for (const score of ['h12_1', 'h6_1']) {
+    await labs.goto(`${base}#/labs/rank-river?score=${score}&mode=raw`, { waitUntil: 'networkidle' });
+    await labs.waitForSelector('.river-names button', { timeout: 20000 });
+    perView[score] = await labs.evaluate(() =>
+      [...document.querySelectorAll('.river-names button')].map((b) => b.textContent.replace(/#\d+\s*/, '').trim()));
+  }
+  check('labs: it follows the selected view',
+    perView.h12_1.join(',') !== perView.h6_1.join(','),
+    `${perView.h12_1.slice(0, 3)} vs ${perView.h6_1.slice(0, 3)}`);
+  {
+    const top20 = JSON.parse(readFileSync('web/data/labs/rank-history.json', 'utf8'));
+    check('labs: the names match the sidecar for that view',
+      perView.h6_1.join(',') === top20.views['h6_1|raw'].symbols.join(','),
+      perView.h6_1.slice(0, 3).join(','));
+  }
+
+  // Core keeps working when the experiment's data is gone.
+  // This page provokes a 404 on purpose, so its own console error is expected.
+  const noData = await newPage('light', /rank-history\.json|404/);
+  await noData.route('**/rank-history.json', (r) => r.fulfill({ status: 404, body: 'gone' }));
+  await noData.goto(`${base}#/labs/rank-river?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await noData.waitForSelector('.lab .loading', { timeout: 15000 });
+  const empty = await noData.evaluate(() => document.querySelector('.lab .loading')?.textContent ?? '');
+  check('labs: a missing sidecar degrades to a sentence', /no rank history/i.test(empty), empty.trim().slice(0, 60));
+  await noData.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await noData.waitForSelector('.stock');
+  const coreOk = await noData.evaluate(() => document.querySelectorAll('.stock').length);
+  check('labs: the ranked list is unaffected by the sidecar being gone', coreOk > 0, String(coreOk));
 }
 
 // ---- per-ticker screen -----------------------------------------------------
