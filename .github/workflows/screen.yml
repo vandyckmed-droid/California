@@ -1,0 +1,69 @@
+name: Refresh momentum screen
+
+on:
+  # Weekdays at 21:30 UTC — after the U.S. close, so the latest session is final.
+  schedule:
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: momentum-screen
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
+
+      # Only the scheduled/manual runs need live data; a push can rebuild the
+      # page from the snapshot already in the repo.
+      - name: Refresh snapshot
+        if: github.event_name != 'push'
+        env:
+          API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::error::FMP_API_KEY is not set. This project has no fallback data source."
+            exit 1
+          fi
+          npm run screen
+
+      - name: Commit refreshed snapshot
+        if: github.event_name != 'push'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data
+          if git diff --cached --quiet; then
+            echo "Snapshot unchanged."
+          else
+            git commit -m "Refresh momentum snapshot ($(date -u +%Y-%m-%d))"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4
