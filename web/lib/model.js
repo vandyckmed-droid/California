@@ -13,7 +13,8 @@
 
 export const HORIZONS = ['h12_1', 'h9_1', 'h6_1'];
 export const SCORE_KEYS = ['h12_1', 'h9_1', 'h6_1', 'blend'];
-export const SCORE_LABELS = { h12_1: '12–1', h9_1: '9–1', h6_1: '6–1', blend: 'Blend' };
+const SCORE_LABELS_BASE = { h12_1: '12–1', h9_1: '9–1', h6_1: '6–1', blend: 'Blend' };
+export const SCORE_LABELS = SCORE_LABELS_BASE;
 
 /**
  * @typedef {object} Row
@@ -127,6 +128,49 @@ export function applyFilters(rows, ranks, filters) {
   out.sort((a, b) => /** @type {number} */ (ranks[a.i]) - /** @type {number} */ (ranks[b.i]));
   return out;
 }
+
+/**
+ * The metrics a row can display, one at a time.
+ *
+ * The list shows one number, not four — everything is available on the ticker
+ * screen, so the list stays scannable. Adding a metric is one entry here.
+ *
+ * @type {{key: string, label: string, get: (s: any, i: number, score: number) => number, fmt: (v: number) => string, floored?: (s: any, i: number) => boolean}[]}
+ */
+export const METRICS = [
+  {
+    key: 'score', label: 'Score',
+    get: (_s, _i, score) => score,
+    fmt: (v) => String(v),
+  },
+  .../** @type {const} */ (['h12_1', 'h9_1', 'h6_1']).map((h, idx) => ({
+    key: /** @type {string} */ (h), label: SCORE_LABELS_BASE[h],
+    get: (/** @type {any} */ s, /** @type {number} */ i) => s.columns.m[idx][i],
+    fmt: (/** @type {number} */ v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`,
+  })),
+  {
+    key: 'vol', label: 'Volatility',
+    // The floored figure, since that is what the vol-adjusted ranking divides
+    // by. Rows where the floor is binding are marked, and the ticker screen
+    // shows realized and effective side by side.
+    get: (s, i) => Math.max(s.columns.rv[0][i], s.meta.params.volFloorAnnualized),
+    fmt: (v) => `${(v * 100).toFixed(0)}%`,
+    floored: (s, i) => s.columns.rv[0][i] < s.meta.params.volFloorAnnualized,
+  },
+  {
+    key: 'marketCap', label: 'Market cap',
+    get: (s, i) => s.columns.marketCapM[i] * 1e6,
+    fmt: (v) => (v >= 1e12 ? `$${(v / 1e12).toFixed(2)}T` : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${(v / 1e6).toFixed(0)}M`),
+  },
+  {
+    key: 'price', label: 'Price',
+    get: (s, i) => s.columns.price[i],
+    fmt: (v) => `$${v.toFixed(2)}`,
+  },
+];
+
+export const metricByKey = (/** @type {string} */ key) =>
+  METRICS.find((m) => m.key === key) ?? /** @type {typeof METRICS[0]} */ (METRICS[0]);
 
 /**
  * Row indices sharing a universe cluster with any of `selection`, at a given

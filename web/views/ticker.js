@@ -1,4 +1,7 @@
-import { currentRanks, loadSeries, marketCapLabel, navigate, num, pct, state, syncHash } from '../app.js';
+import {
+  currentRanks, loadSeries, marketCapLabel, navigate, num, pct, state, syncHash,
+  toggleWatch, watchlist,
+} from '../app.js';
 import { scoresFor, ranksFor } from '../lib/model.js';
 import { HORIZONS, SCORE_LABELS } from '../lib/model.js';
 import { escapeHtml } from './list.js';
@@ -218,6 +221,20 @@ export function renderTicker(app, snapshot, symbol) {
     <div class="meta">${escapeHtml(sym.name)}</div>
     <div class="meta">${escapeHtml(sym.sector || '—')} · ${escapeHtml(sym.exchange)} · ${marketCapLabel(sym.marketCap)} · $${sym.price.toFixed(2)}</div>`;
   app.append(title);
+
+  // Same one-tap model as the list: checking is saving, and the button states
+  // what it will do rather than what the name currently is.
+  const watch = document.createElement('button');
+  watch.type = 'button';
+  watch.className = 'watch-toggle';
+  const paintWatch = () => {
+    const on = watchlist.has(symbol);
+    watch.setAttribute('aria-pressed', String(on));
+    watch.textContent = on ? '✓ On your watchlist' : '+ Add to watchlist';
+  };
+  paintWatch();
+  watch.addEventListener('click', () => { toggleWatch(symbol); paintWatch(); });
+  title.append(watch);
 
   // The chart needs this one name's prices — ~640 bytes, fetched on arrival.
   const chart = document.createElement('div');

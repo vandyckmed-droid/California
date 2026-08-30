@@ -5,9 +5,10 @@
  * the ranked list is interactive immediately. Price series are fetched per
  * symbol, only when a chart or the watchlist actually needs one.
  */
-import { buildRows, ranksFor, scoresFor } from './lib/model.js';
+import { buildRows, METRICS, ranksFor, scoresFor } from './lib/model.js';
 import { renderList } from './views/list.js';
 import { renderTicker } from './views/ticker.js';
+import { renderWatchlist } from './views/watchlist.js';
 
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
@@ -19,7 +20,55 @@ export const state = {
   sectors: /** @type {Set<string>} */ (new Set()),
   minMarketCap: 0,
   search: '',
+  /** Which number each row shows. One at a time, not all of them. */
+  metric: 'score',
+  /** Weighting assumption on the watchlist. A description, not a proposal. */
+  weighting: 'equal',
 };
+
+/**
+ * The watchlist: a plain set of symbols that persists on this device.
+ *
+ * Checking a box *is* saving. There is no separate save step, because a second
+ * concept (ad-hoc selection vs a saved list) would double the mental model for
+ * a tool whose requirement is "a list I can check and clear".
+ */
+const WATCHLIST_KEY = 'california.watchlist.v1';
+
+/** @type {Set<string>} */
+export const watchlist = new Set(readWatchlist());
+
+function readWatchlist() {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : [];
+  } catch {
+    // Private mode, cleared storage, a browser blocking site data: start empty
+    // rather than failing to render.
+    return [];
+  }
+}
+
+function persistWatchlist() {
+  try {
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify([...watchlist]));
+  } catch {
+    // Nothing to do; the list still works for this session.
+  }
+}
+
+/** @param {string} symbol */
+export function toggleWatch(symbol) {
+  if (watchlist.has(symbol)) watchlist.delete(symbol);
+  else watchlist.add(symbol);
+  persistWatchlist();
+}
+
+export function clearWatchlist() {
+  watchlist.clear();
+  persistWatchlist();
+}
 
 /** @type {any} */
 let snapshot = null;
@@ -95,7 +144,7 @@ function parseHash() {
   const raw = location.hash.replace(/^#\/?/, '');
   const [route, query] = raw.split('?');
   const params = new URLSearchParams(query ?? '');
-  for (const key of ['score', 'mode', 'threshold', 'search']) {
+  for (const key of ['score', 'mode', 'threshold', 'search', 'metric', 'weighting']) {
     const v = params.get(key);
     if (v !== null) state[key] = v;
   }
@@ -120,6 +169,8 @@ function clampState() {
   if (!thresholds.includes(state.threshold)) {
     state.threshold = thresholds.includes('0.65') ? '0.65' : thresholds[0];
   }
+  if (!METRICS.some((m) => m.key === state.metric)) state.metric = 'score';
+  if (!['equal', 'invvol'].includes(state.weighting)) state.weighting = 'equal';
   const known = new Set(snapshot.columns.sectors);
   state.sectors = new Set([...state.sectors].filter((s) => known.has(s)));
   if (!Number.isFinite(state.minMarketCap) || state.minMarketCap < 0) state.minMarketCap = 0;
@@ -127,6 +178,8 @@ function clampState() {
 
 function queryString() {
   const params = new URLSearchParams({ score: state.score, mode: state.mode, threshold: state.threshold });
+  if (state.metric !== 'score') params.set('metric', state.metric);
+  if (state.weighting !== 'equal') params.set('weighting', state.weighting);
   if (state.sectors.size > 0) params.set('sectors', [...state.sectors].join(','));
   if (state.minMarketCap > 0) params.set('cap', String(state.minMarketCap));
   if (state.search) params.set('search', state.search);
@@ -148,7 +201,8 @@ export function rerender({ keepScroll = false } = {}) {
   const route = parseHash();
   clampState();
   const y = window.scrollY;
-  if (route && route !== '') renderTicker(app, snapshot, decodeURIComponent(route));
+  if (route === 'watchlist') renderWatchlist(app);
+  else if (route && route !== '') renderTicker(app, snapshot, decodeURIComponent(route));
   else renderList(app);
   window.scrollTo(0, keepScroll ? y : 0);
 }

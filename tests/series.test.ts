@@ -88,9 +88,22 @@ describe('shipped payload budgets', () => {
       columns: { symbol: string[] };
     };
     // The point of the budget: it covers every eligible name, not a Top 100.
-    expect(snapshot.columns.symbol.length).toBeGreaterThan(1500);
-    // ~122 KB measured. Cap at 140 KB.
-    expect(gzippedBytes('web/data/snapshot.json')).toBeLessThan(140 * 1024);
+    expect(snapshot.columns.symbol.length).toBeGreaterThan(2000);
+    // Re-set from measurement after the universe widened to a $200M floor:
+    // ~135 KB for 2,572 names, capped at 165 KB for ~22% headroom. Reset
+    // deliberately rather than left at a figure the design had already spent,
+    // so a failure means something regressed rather than the cap being stale.
+    expect(gzippedBytes('web/data/snapshot.json')).toBeLessThan(165 * 1024);
+  });
+
+  it('stays cheap per name as the universe grows', () => {
+    // The real invariant behind the cap: cost scales with the universe, so a
+    // per-name figure catches bloat that a total would hide behind growth.
+    const snapshot = JSON.parse(readFileSync('web/data/snapshot.json', 'utf8')) as {
+      columns: { symbol: string[] };
+    };
+    const perName = gzippedBytes('web/data/snapshot.json') / snapshot.columns.symbol.length;
+    expect(perName).toBeLessThan(70);
   });
 
   it('carries no price series in the snapshot at all', () => {

@@ -79,8 +79,10 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
   // gzipped as row objects against 112 KB as columns, for identical data.
   const sectors = [...new Set(input.metrics.map((m) => member(m).sector))].sort();
   const exchanges = [...new Set(input.metrics.map((m) => member(m).exchange))].sort();
+  const countries = [...new Set(input.metrics.map((m) => member(m).country))].sort();
   const sectorIndex = new Map(sectors.map((v, i) => [v, i]));
   const exchangeIndex = new Map(exchanges.map((v, i) => [v, i]));
+  const countryIndex = new Map(countries.map((v, i) => [v, i]));
 
   function member(m: StockMetrics): UniverseMember {
     return input.members.get(m.symbol) as UniverseMember;
@@ -93,6 +95,15 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
     exchanges,
     sector: input.metrics.map((m) => sectorIndex.get(member(m).sector) ?? 0),
     exchange: input.metrics.map((m) => exchangeIndex.get(member(m).exchange) ?? 0),
+    /**
+     * Domicile, carried but not filtered on. It is here so a domicile filter
+     * is a UI change rather than a pipeline re-run — and deliberately not used
+     * as an exclusion rule, because the field cannot support one honestly:
+     * FMP places PDD in Ireland and Trip.com in Singapore, so a "China" rule
+     * would drop Alibaba and keep PDD.
+     */
+    countries,
+    country: input.metrics.map((m) => countryIndex.get(member(m).country) ?? 0),
     price: input.metrics.map((m) => r(m.latestClose, 2)),
     /** Millions, so a $1.2T cap is 1200000 rather than 1200000000000. */
     marketCapM: input.metrics.map((m) => Math.round(member(m).marketCap / 1e6)),

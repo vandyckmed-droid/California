@@ -17,7 +17,14 @@ export type Exchange = (typeof EXCHANGES)[number];
 // Tradability gates
 // ---------------------------------------------------------------------------
 
-export const MIN_MARKET_CAP = 1_000_000_000;
+/**
+ * Market cap is a weak proxy for tradability and the liquidity gate below is
+ * the one doing the work: measured, moving this floor from $1B to $200M adds
+ * ~380 names and every one of them still clears $5M/day. Set low deliberately
+ * so the universe is "everything you could actually trade" rather than
+ * "everything large".
+ */
+export const MIN_MARKET_CAP = 200_000_000;
 export const MIN_PRICE = 5;
 /** Median daily dollar volume over the trailing correlation window. */
 export const MIN_MEDIAN_DOLLAR_VOLUME = 5_000_000;
