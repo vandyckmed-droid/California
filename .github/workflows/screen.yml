@@ -1,0 +1,89 @@
+name: Refresh momentum screen
+
+on:
+  # Weekdays at 23:00 UTC. The U.S. close is 20:00 UTC in summer and 21:00 UTC
+  # in winter, so this clears it by three hours year-round and gives FMP time
+  # to finalize the session's bars before the screen reads them.
+  schedule:
+    - cron: '0 23 * * 1-5'
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: momentum-screen-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Runs on every event, including pull requests, so a PR gets a real check.
+  # Needs no credentials: the tests are pure and never touch the network.
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+
+  # Refreshing the snapshot and publishing are skipped on pull requests: they
+  # need the FMP key and write access, which a PR build should not carry.
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: github.event_name != 'push'
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+        if: github.event_name != 'push'
+
+      # A push to main republishes the snapshot already in the repo; only the
+      # scheduled and manual runs fetch fresh data.
+      - name: Refresh snapshot
+        if: github.event_name != 'push'
+        env:
+          API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::error::FMP_API_KEY is not set. This project has no fallback data source."
+            exit 1
+          fi
+          npm run screen
+
+      - name: Commit refreshed snapshot
+        if: github.event_name != 'push'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data
+          if git diff --cached --quiet; then
+            echo "Snapshot unchanged."
+          else
+            git commit -m "Refresh momentum snapshot ($(date -u +%Y-%m-%d))"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

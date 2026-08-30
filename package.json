@@ -1,0 +1,23 @@
+{
+  "name": "california-momentum-screen",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phone-first multi-horizon momentum screen with correlation grouping, sourced from Financial Modeling Prep.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "screen": "node src/run.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "serve": "npx --yes serve web -l 5173",
+    "verify:ui": "node scripts/verify-ui.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
+  }
+}
