@@ -19,7 +19,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { chromium } from 'playwright';
 
-const PORT = Number(process.env.PORT ?? 5173);
+// Port 0 lets the OS pick a free one, so a stray server left by an earlier run
+// cannot fail this with EADDRINUSE.
+const PORT = Number(process.env.PORT ?? 0);
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json' };
 
 const failures = [];
@@ -36,9 +38,10 @@ const server = createServer((req, res) => {
   res.end(readFileSync(path));
 });
 await new Promise((r) => server.listen(PORT, r));
+const port = server.address().port;
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
-const base = `http://localhost:${PORT}/`;
+const base = `http://localhost:${port}/`;
 const snapshot = JSON.parse(readFileSync('web/data/snapshot.json', 'utf8'));
 
 const newPage = async (colorScheme = 'light') => {
@@ -114,14 +117,25 @@ check('detail: loads nothing from a third-party host',
 
 // The highlighted window must follow the view being ranked on.
 for (const [score, label] of [['h9_1', '9-1'], ['h6_1', '6-1']]) {
-  await page.goto(`${base}#/${top}?score=${score}&mode=raw&threshold=0.65`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('.hz-label.on');
-  const active = await page.evaluate(() =>
-    document.querySelector('.hz-label.on')?.textContent?.trim() ?? '');
+  await page.goto(`${base}#/${top}?score=${score}&mode=raw&threshold=0.65`, { waitUntil: 'networkidle' });
+  // A hash change re-renders asynchronously and `.hz-label.on` already exists
+  // from the previous view, so waiting on the selector alone would return
+  // against stale DOM and let a broken highlight pass.
+  let active = '';
+  try {
+    await page.waitForFunction(
+      (want) => document.querySelector('.hz-label.on')?.textContent?.trim().startsWith(want),
+      label,
+      { timeout: 5000 },
+    );
+    active = await page.evaluate(() => document.querySelector('.hz-label.on')?.textContent?.trim() ?? '');
+  } catch {
+    active = await page.evaluate(() => document.querySelector('.hz-label.on')?.textContent?.trim() ?? '(none)');
+  }
   check(`detail: ${label} view highlights the ${label} window`, active.startsWith(label), active);
 }
 
-// ---- stale or malformed hash params// ---- stale or malformed hash params ----------------------------------------
+// ---- stale or malformed hash params ----------------------------------------
 // A bookmark from before a params change must still render, not blank the page.
 const stale = await newPage();
 for (const [hash, label] of [
@@ -130,7 +144,7 @@ for (const [hash, label] of [
   ['#/?score=h12_1&mode=sideways&threshold=0.65', 'unknown mode'],
   ['#/?threshold=', 'empty threshold'],
 ]) {
-  await stale.goto(`${base}${hash}`, { waitUntil: 'domcontentloaded' });
+  await stale.goto(`${base}${hash}`, { waitUntil: 'networkidle' });
   let rendered = false;
   try {
     await stale.waitForSelector('.card', { timeout: 8000 });
@@ -148,10 +162,8 @@ for (const [hash, label] of [
 }
 
 // ---- back navigation preserves the chosen view -----------------------------
-// A fresh page: navigating by hash away from a page that already holds a chart
-// iframe never reaches "networkidle", which is a harness quirk, not a bug.
 const navPage = await newPage();
-await navPage.goto(`${base}#/?score=h9_1&mode=voladj&threshold=0.70`, { waitUntil: 'domcontentloaded' });
+await navPage.goto(`${base}#/?score=h9_1&mode=voladj&threshold=0.70`, { waitUntil: 'networkidle' });
 await navPage.waitForSelector('.card');
 await navPage.click('.stock');
 await navPage.waitForSelector('.detail-head h2');
@@ -163,7 +175,7 @@ check('back button restores the chosen view', restored.join(',').includes('9–1
 
 // ---- dark mode -------------------------------------------------------------
 const dark = await newPage('dark');
-await dark.goto(`${base}#/${top}?score=h12_1&mode=raw&threshold=0.65`, { waitUntil: 'domcontentloaded' });
+await dark.goto(`${base}#/${top}?score=h12_1&mode=raw&threshold=0.65`, { waitUntil: 'networkidle' });
 await dark.waitForSelector('.chart-wrap svg.spark', { timeout: 15000 });
 const darkTheme = await dark.evaluate(() => {
   const line = document.querySelector('.spark path.line');

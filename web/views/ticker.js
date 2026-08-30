@@ -65,21 +65,22 @@ function priceChart(sym, snapshot, activeHorizon) {
   const skip = horizons.h12_1.skip;
   const skipX = x(last - skip);
 
-  const pct = (i) => ((i / last) * 100).toFixed(2);
+  // Position along the viewBox, distinct from the imported `pct` display formatter.
+  const xPct = (i) => ((i / last) * 100).toFixed(2);
   const bars = ['h12_1', 'h9_1', 'h6_1'].map((key) => {
     const h = horizons[key];
-    const left = pct(last - h.lookback);
+    const left = xPct(last - h.lookback);
     const width = (((h.lookback - h.skip) / last) * 100).toFixed(2);
     const stat = sym.horizons[key];
     const cls = `${stat.momentum >= 0 ? 'pos' : 'neg'}${key === activeHorizon ? ' on' : ''}`;
     return `<div class="hz-row">
       <div class="hz-bar ${cls}" style="left:${left}%;width:${width}%"></div>
-      <span class="hz-label ${cls}" style="left:${left}%">${h.label} ${fmtPct(stat.momentum)}</span>
+      <span class="hz-label ${cls}" style="left:${left}%">${h.label} ${pct(stat.momentum)}</span>
     </div>`;
   }).join('');
 
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
-    aria-label="${sym.name} price from ${dates[0] ?? ''} to ${dates[dates.length - 1] ?? ''}">
+    aria-label="${escapeHtml(sym.name)} price from ${dates[0] ?? ''} to ${dates[dates.length - 1] ?? ''}">
     <rect class="skip" x="${skipX.toFixed(1)}" y="0" width="${(W - skipX).toFixed(1)}" height="${H}" />
     <path class="area" d="${area}" />
     <path class="line" d="${line}" />
@@ -92,10 +93,6 @@ function priceChart(sym, snapshot, activeHorizon) {
     <span class="skip-note">shaded ${skip} sessions excluded</span>
     <span>${dates[dates.length - 1] ?? snapshot.meta.asOf}</span>
   </div>`;
-}
-
-function fmtPct(v) {
-  return `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`;
 }
 
 function statsTable(sym) {
@@ -167,7 +164,7 @@ export function renderTicker(app, snapshot, symbol) {
   title.innerHTML = `
     <h2>${symbol}${entry ? ` <span class="as-of">#${entry.rank}</span>` : ''}</h2>
     <div class="meta">${escapeHtml(sym.name)}</div>
-    <div class="meta">${escapeHtml(sym.sector || '—')} · ${sym.exchange} · ${marketCap(sym.marketCap)} · $${sym.price.toFixed(2)}</div>`;
+    <div class="meta">${escapeHtml(sym.sector || '—')} · ${escapeHtml(sym.exchange)} · ${marketCap(sym.marketCap)} · $${sym.price.toFixed(2)}</div>`;
   app.append(title);
 
   const chart = document.createElement('div');

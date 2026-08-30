@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { decodeSeries, encodeSeries, SERIES_LEVELS } from '../src/pipeline/series.ts';
 
@@ -60,10 +62,32 @@ describe('price series encoding', () => {
     expect(decodeSeries({ points: '', lo: 0, hi: 0 })).toEqual([]);
   });
 
-  it('stays compact enough to ship for the whole displayed universe', () => {
-    const one = encodeSeries(Array.from({ length: 253 }, (_, i) => 100 + Math.sin(i) * 10));
-    const bytes = JSON.stringify(one).length * 278;
-    // Raw daily closes for 278 names would be several hundred KB.
-    expect(bytes).toBeLessThan(90_000);
+  /**
+   * A payload budget, measured against the committed snapshot rather than
+   * extrapolated from one series times today's symbol count.
+   *
+   * The number of names carrying a series is the size of the union of the
+   * eight Top 100s — an emergent property of the data, not a constant. It grows
+   * whenever the eight rankings overlap less, so a guard that multiplies by a
+   * hardcoded count cannot notice the growth it exists to catch.
+   *
+   * Denominated in gzipped bytes because that is what a phone downloads:
+   * shipping the series doubled the snapshot over the wire, 48 KB -> 96 KB,
+   * of which the series are ~42 KB.
+   */
+  it('keeps the shipped series payload within budget', () => {
+    const raw = readFileSync('web/data/snapshot.json', 'utf8');
+    const snapshot = JSON.parse(raw) as {
+      symbols: Record<string, { series?: unknown }>;
+    };
+    const withSeries = Object.values(snapshot.symbols).filter((s) => s.series);
+    expect(withSeries.length).toBeGreaterThan(0);
+
+    const seriesOnly = JSON.stringify(withSeries.map((s) => s.series));
+    const gzipped = gzipSync(Buffer.from(seriesOnly), { level: 9 }).length;
+
+    // ~42 KB today. Fails on real growth in how many names carry a series,
+    // rather than on a number frozen at the count that happened to be current.
+    expect(gzipped).toBeLessThan(90_000);
   });
 });
