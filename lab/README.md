@@ -28,6 +28,23 @@ All three are drawn from figures the snapshot already carries. The correlation
 maths comes from `web/lib/quant.js` — the shipped implementation, imported, not
 copied, so the lab cannot quietly disagree with the pipeline.
 
+## `field/` — the wider exploration
+
+`lab/field/` is the second pass: five ways of seeing the whole universe rather
+than five ways of decorating a row. Same server, `http://localhost:5173/lab/field/`.
+
+| | concept | scope | data |
+|---|---|---|---|
+| 1 | Spectrogram | 2,572 x 126 as one image | real |
+| 2 | Territories | all 360 groups as a map | real |
+| 3 | Telescope | one chart, three horizons | real |
+| 4 | Broadsheet | top 100 as pure type | real |
+| 5 | Rank river | 20 paths over 60 sessions | **invented, flagged in the UI** |
+
+`node lab/field/build.mjs` regenerates everything in `lab/field/data/` from the
+committed snapshot. The twenty-concept field the five were chosen from is in
+`visual-concept-field.md`.
+
 ## Why no rank-history concepts
 
 The pipeline overwrites `web/data/snapshot.json` on every run and keeps no
