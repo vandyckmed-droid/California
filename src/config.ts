@@ -47,15 +47,43 @@ export const HORIZONS: Record<HorizonKey, { lookback: number; skip: number; labe
 export const MAX_LOOKBACK = Math.max(...HORIZON_KEYS.map((k) => HORIZONS[k].lookback));
 
 // ---------------------------------------------------------------------------
-// Volatility adjustment
+// Correlation grouping
+// ---------------------------------------------------------------------------
+
+export const CORR_WINDOW = 126;
+export const THRESHOLDS = [0.6, 0.65, 0.7] as const;
+export const TOP_N = 100;
+
+// ---------------------------------------------------------------------------
+// Volatility
 // ---------------------------------------------------------------------------
 
 export const TRADING_DAYS_PER_YEAR = 252;
 /**
  * Annualized volatility floor, applied independently per horizon. A name whose
  * realized volatility is below this gets no extra credit for being quiet.
+ *
+ * This floor belongs to the *ranking*: it is the divisor the vol-adjusted
+ * views use. It is deliberately not applied to the trailing volatility below,
+ * which nothing divides by and which is therefore reported honestly.
  */
 export const VOL_FLOOR_ANNUALIZED = 0.175;
+
+/**
+ * Sessions in the trailing volatility the list displays.
+ *
+ * Every momentum horizon stops `skip` sessions short of today, because a
+ * momentum signal must not be contaminated by the short-term reversal window
+ * it excludes. "How volatile is this name right now" is the opposite question:
+ * leaving the last month out makes the answer stale exactly when it matters,
+ * so this window runs right up to the latest session.
+ *
+ * Defined as the correlation window so the figure on the list is the same
+ * quantity the watchlist reports per name. Two constants that happened to both
+ * read 126 could drift apart and the two screens would quietly disagree about
+ * one name's volatility.
+ */
+export const TRAILING_VOL_WINDOW = CORR_WINDOW;
 
 // ---------------------------------------------------------------------------
 // Cross-sectional normalization (only affects the Blend; see README)
@@ -77,14 +105,6 @@ export const BLEND_WEIGHT = 1 / 3;
  * of truth is worth more than the discarded digits.
  */
 export const Z_DECIMALS = 4;
-
-// ---------------------------------------------------------------------------
-// Correlation grouping
-// ---------------------------------------------------------------------------
-
-export const CORR_WINDOW = 126;
-export const THRESHOLDS = [0.6, 0.65, 0.7] as const;
-export const TOP_N = 100;
 
 // ---------------------------------------------------------------------------
 // Data quality

@@ -130,35 +130,12 @@ export function applyFilters(rows, ranks, filters) {
 }
 
 /**
- * Which horizon a view's score is built from.
- *
- * The blend has no single horizon — it averages three — so it reports 12-1 and
- * anything displaying a per-horizon figure has to say which one it showed.
- *
- * @param {string} scoreKey
- * @returns {number}
- */
-export function horizonIndexFor(scoreKey) {
-  const h = HORIZONS.indexOf(scoreKey);
-  return h < 0 ? 0 : h;
-}
-
-/** Which window a view's volatility figure is drawn from, for the label. */
-const VOL_LABELS = /** @type {Record<string, string>} */ ({
-  h12_1: '12–1', h9_1: '9–1', h6_1: '6–1', blend: '12–1',
-});
-
-/**
  * The metrics a row can display, one at a time.
  *
  * The list shows one number, not four — everything is available on the ticker
  * screen, so the list stays scannable. Adding a metric is one entry here.
  *
- * `get` and `floored` take the active view's horizon index, because a metric
- * that reads a per-horizon column has to read the *viewed* horizon: a fixed
- * index shows one window's number beside another window's ranking.
- *
- * @type {{key: string, label: string, labelFor?: (scoreKey: string) => string, get: (s: any, i: number, score: number, h: number) => number, fmt: (v: number) => string, floored?: (s: any, i: number, h: number) => boolean}[]}
+ * @type {{key: string, label: string, labelFor?: (s: any) => string, get: (s: any, i: number, score: number) => number, fmt: (v: number) => string}[]}
  */
 export const METRICS = [
   {
@@ -173,16 +150,28 @@ export const METRICS = [
   })),
   {
     key: 'vol', label: 'Volatility',
-    // The floored figure for the *viewed* horizon, since that is what the
-    // vol-adjusted ranking divides by. Reading a fixed `rv[0]` here showed the
-    // 12-1 volatility beside a 6-1 ranking, which inverted the floor mark for
-    // every name that straddles the floor between the two windows. The label
-    // names the horizon so the number is always attributable — including under
-    // the blend, which has no single divisor of its own.
-    labelFor: (scoreKey) => `Volatility (${VOL_LABELS[scoreKey] ?? VOL_LABELS.h12_1})`,
-    get: (s, i, _score, h) => Math.max(s.columns.rv[h][i], s.meta.params.volFloorAnnualized),
+    /**
+     * Trailing realized volatility, right up to the latest session.
+     *
+     * Deliberately *not* a horizon volatility. Every horizon stops 21 sessions
+     * short, because a momentum signal must not be contaminated by the
+     * short-term reversal window it excludes — but "how volatile is this name"
+     * is the opposite question, and an answer that ends a month ago is stale
+     * exactly when it matters. So this reads one column that does not vary
+     * with the view: switching between 12-1 and 6-1 changes the ranking, not
+     * this number.
+     *
+     * Reported unfloored. The 17.5% floor exists because the vol-adjusted
+     * views divide by it; nothing divides by this, so flooring it would
+     * overstate every quiet name for no reason, and a "floor" mark here would
+     * point at a mechanism this figure is not part of.
+     *
+     * The label names the window from the snapshot rather than hardcoding it,
+     * so the two cannot drift apart.
+     */
+    labelFor: (s) => `Volatility (${s.meta.params.trailingVolWindow ?? 126}d)`,
+    get: (s, i) => s.columns.rvT[i],
     fmt: (v) => `${(v * 100).toFixed(0)}%`,
-    floored: (s, i, h) => s.columns.rv[h][i] < s.meta.params.volFloorAnnualized,
   },
   {
     key: 'marketCap', label: 'Market cap',

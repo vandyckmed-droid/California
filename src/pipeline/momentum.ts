@@ -7,6 +7,7 @@ import {
   MIN_PRICE,
   MIN_ACTUAL_BAR_COVERAGE,
   TRADING_DAYS_PER_YEAR,
+  TRAILING_VOL_WINDOW,
   VOL_FLOOR_ANNUALIZED,
   type HorizonKey,
 } from '../config.ts';
@@ -28,6 +29,11 @@ export interface HorizonStats {
 export interface StockMetrics {
   symbol: string;
   horizons: Record<HorizonKey, HorizonStats>;
+  /**
+   * Annualized volatility over the trailing `TRAILING_VOL_WINDOW` sessions,
+   * up to and including the latest one. Reported, never ranked on.
+   */
+  trailingVol: number;
   latestClose: number;
   dollarVolume: number;
 }
@@ -70,6 +76,30 @@ export function horizonStats(
   const effectiveVol = Math.max(realizedVol, VOL_FLOOR_ANNUALIZED);
 
   return { momentum, realizedVol, effectiveVol, volAdjusted: momentum / effectiveVol };
+}
+
+/**
+ * Annualized volatility over the most recent `window` sessions.
+ *
+ * Distinct from every `HorizonStats.realizedVol` in one way that matters: it
+ * includes the skipped month. The horizons stop 21 sessions short so a
+ * momentum signal is not contaminated by the reversal window it excludes;
+ * a "how volatile is this name" figure that stopped 21 sessions short would
+ * simply be a month out of date.
+ *
+ * `window` returns come from `window + 1` closes, matching `windowReturns` in
+ * the correlation module so the list and the watchlist measure the same thing.
+ */
+export function trailingVol(
+  closes: readonly number[],
+  L: number,
+  window: number,
+): number | null {
+  const from = L - window;
+  if (from < 0) return null;
+  const rets = simpleReturns(closes.slice(from, L + 1));
+  if (rets.length < 2) return null;
+  return sampleStdDev(rets) * Math.sqrt(TRADING_DAYS_PER_YEAR);
 }
 
 /**
@@ -120,7 +150,15 @@ export function computeMetrics(
     horizons[key] = stats;
   }
 
-  return { ok: true, metrics: { symbol: member.symbol, horizons, latestClose, dollarVolume } };
+  // The eligibility span covers MAX_LOOKBACK sessions and the trailing window
+  // is far shorter, so every close it needs is present and already validated.
+  const tv = trailingVol(closes, L, TRAILING_VOL_WINDOW);
+  if (tv === null || !Number.isFinite(tv)) return { ok: false, reason: 'badPrices' };
+
+  return {
+    ok: true,
+    metrics: { symbol: member.symbol, horizons, trailingVol: tv, latestClose, dollarVolume },
+  };
 }
 
 /**

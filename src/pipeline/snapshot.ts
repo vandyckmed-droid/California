@@ -11,6 +11,7 @@ import {
   MODES,
   THRESHOLDS,
   TOP_N,
+  TRAILING_VOL_WINDOW,
   VOL_FLOOR_ANNUALIZED,
   WINSOR_LOWER_PCT,
   WINSOR_UPPER_PCT,
@@ -111,6 +112,13 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
     m: HORIZON_KEYS.map((h) => input.metrics.map((x) => r(x.horizons[h].momentum, 5))),
     rv: HORIZON_KEYS.map((h) => input.metrics.map((x) => r(x.horizons[h].realizedVol, 4))),
     /**
+     * Trailing annualized volatility over the last TRAILING_VOL_WINDOW
+     * sessions, including the month every horizon skips. Separate from `rv`
+     * because it answers a different question and is never ranked on — it is
+     * reported unfloored, since no view divides by it.
+     */
+    rvT: input.metrics.map((x) => r(x.trailingVol, 4)),
+    /**
      * Cross-sectional z-scores, already rounded by the normalization itself,
      * so these are the exact values the pipeline ranked from. The browser
      * cannot derive them: winsorized z-scores depend on the full cross-section
@@ -133,6 +141,8 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
         ]),
       ),
       volFloorAnnualized: VOL_FLOOR_ANNUALIZED,
+      /** Sessions behind `columns.rvT`; the list labels itself from this. */
+      trailingVolWindow: TRAILING_VOL_WINDOW,
       winsorPct: [WINSOR_LOWER_PCT, WINSOR_UPPER_PCT],
       blendWeight: r(BLEND_WEIGHT, 6),
       corrWindow: CORR_WINDOW,

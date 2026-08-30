@@ -3,7 +3,7 @@ import {
   navigate, rerender, state, syncHash, toggleWatch, watchlist,
 } from '../app.js';
 import {
-  applyFilters, horizonIndexFor, markedRows, METRICS, metricByKey, SCORE_LABELS,
+  applyFilters, markedRows, METRICS, metricByKey, SCORE_LABELS,
 } from '../lib/model.js';
 
 /** Rows rendered per batch. The rest arrive as you scroll. */
@@ -146,9 +146,9 @@ function headerParts(snapshot, matched, total) {
   for (const m of METRICS) {
     const opt = document.createElement('option');
     opt.value = m.key;
-    // A per-horizon metric names its horizon, so the number on the row is
-    // always attributable to a window rather than to "volatility" in general.
-    opt.textContent = m.labelFor?.(state.score) ?? m.label;
+    // A metric measured over a window names that window, so the number on the
+    // row is attributable rather than just "volatility".
+    opt.textContent = m.labelFor?.(snapshot) ?? m.label;
     opt.selected = m.key === state.metric;
     select.append(opt);
   }
@@ -174,12 +174,10 @@ function stockRow(snapshot, row, rank, score, marked) {
   wrap.className = `stock${selected ? ' on' : ''}`;
 
   const metric = metricByKey(state.metric);
-  const h = horizonIndexFor(state.score);
-  const raw = metric.get(snapshot, row.i, score, h);
+  const raw = metric.get(snapshot, row.i, score);
   const text = metric.key === 'score' ? displayValue(score).text : metric.fmt(raw);
   const tone = metric.key === 'score' || metric.key.startsWith('h')
     ? (raw >= 0 ? ' pos' : ' neg') : '';
-  const floored = metric.floored?.(snapshot, row.i, h) ? '<span class="floor-mark">floor</span>' : '';
 
   const open = document.createElement('a');
   open.className = 'open';
@@ -191,7 +189,7 @@ function stockRow(snapshot, row, rank, score, marked) {
       <div class="sym">${escapeHtml(row.symbol)}${marked ? '<span class="dot" title="Moves with something on your list"></span>' : ''}</div>
       <div class="nm">${escapeHtml(row.name)}</div>
     </div>
-    <div class="val${tone}">${text}${floored}</div>`;
+    <div class="val${tone}">${text}</div>`;
 
   // Its own target, so tapping the row still opens the chart.
   const check = document.createElement('button');
