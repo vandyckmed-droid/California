@@ -5,6 +5,11 @@
 > **This is the only packet in the library drawn on invented data**, and that is
 > deliberate. See *Data required*.
 
+**Status** · **Graduated.** Implemented in PR #6 (*Rank River, and a Labs area to
+put it in*) as a Labs experiment on real 30-session history, derived per run.
+That PR started from `main` and used this packet as reference material only — the
+graduation process in `concepts/README.md`, followed.
+
 **Provenance** · drawn against snapshot `2026-08-28` (`dataHash 7e355cdc75ed19b0`), product at main `b342414`. Ranks, correlation groups and the 126-session correlation window are all from that snapshot; if any of those change, re-read *What it communicates* before trusting the numbers below.
 
 ---
@@ -57,6 +62,22 @@ Ran at `lab/field/#river`. Sixty sessions, twenty names.
 
 ## Data required
 
+> **Superseded — read this first.** This section reasoned that the concept needs
+> new *accumulated* storage, and costed it. PR #6 found a better answer and built
+> it: a single run already holds **371 aligned sessions per name**, so a
+> 30-session backfill reaching back 281 can be **recomputed from prices the
+> pipeline has already fetched**. History is *derived, not accumulated* — no
+> growing repo state, no waiting for history to build, no new API calls, and a
+> wrong number is corrected by the next run instead of being permanent. The
+> shipped sidecar is **15 KB raw / 5.4 KB gzipped**, overwritten each run.
+>
+> The analysis below is kept because it is what was true when the concept was
+> drawn, and because the framing it got wrong is instructive: *"the product threw
+> the history away"* made accumulation feel like the only option, and the
+> question that actually mattered — **how far back does one run already reach?**
+> — went unasked. If you are rebuilding this idea, start from the derivation,
+> not from the table.
+
 **Rank history the product does not keep, and has deliberately chosen not to.**
 
 The pipeline overwrites `web/data/snapshot.json` on every weekday run and keeps
@@ -90,12 +111,26 @@ question.
 
 It is the proof that sketching on fiction is not a compromise. Drawing this
 answered a real question — *is a braid legible, and at what size* — and the
-answer changed the cost estimate for the feature by an order of magnitude, all
-before anyone stored a single byte.
+answer changed the shape of the feature before anyone stored a single byte: the
+sketch established it is a **top-20 object**, and PR #6 built exactly that rather
+than the 200-name version the storage note had costed.
+
+That is the packet earning its keep in the way intended — as a design reference
+that shaped an implementation without being merged into one.
 
 Preserve the method as much as the picture.
 
-**The honest counter-argument:** it is the only concept here that cannot be
-built at all today, and the storage it needs is something the product removed on
-purpose. It should stay a sketch until someone wants the history for a second
-reason.
+**The honest counter-argument, as written and now falsified:** *"it is the only
+concept here that cannot be built at all today, and the storage it needs is
+something the product removed on purpose. It should stay a sketch until someone
+wants the history for a second reason."*
+
+That was wrong, and worth leaving visible rather than quietly editing. It was
+wrong because it accepted the product's own framing of its history as gone
+instead of asking what a single run already holds. **A counter-argument resting
+on a constraint nobody re-derived is the kind most likely to be wrong** — a
+better lesson for the next packet than a tidy correction would have been.
+
+What survives is smaller, and about the drawing rather than the data: a braid is
+mud beyond about twenty names, so this stays a top-20 object however cheap the
+history turns out to be.

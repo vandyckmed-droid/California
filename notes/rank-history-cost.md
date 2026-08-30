@@ -1,5 +1,13 @@
 # What rank history would cost, and why nothing here uses it
 
+> **Superseded by PR #6.** This note costed *accumulating* history and never
+> asked how far back a single run already reaches. It reaches 371 aligned
+> sessions per name, so a 30-session backfill is **derived from prices already
+> fetched** — 15 KB raw, 5.4 KB gzipped, overwritten each run, no growing repo
+> state. The table below is left as the record of a question framed the wrong
+> way: *"the product threw its history away"* made accumulation look like the
+> only route, and it was not the cheapest one available.
+
 A large share of the visual ideas worth having for a ranked list are about
 **movement**: rank trails, bump charts, new-entrant badges, persistence dots,
 "time in the top 20", churn meters, ghosted yesterday-behind-today, "what

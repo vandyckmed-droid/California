@@ -33,7 +33,7 @@ the packet to trust.
 | [`territories/`](territories/packet.md) | understand the universe |
 | [`gravity-basket/`](gravity-basket/packet.md) | understand selected names and duplicate bets |
 | [`horizon-comb/`](horizon-comb/packet.md) | understand one ranked name across momentum horizons |
-| [`rank-river/`](rank-river/packet.md) | understand rank movement through time |
+| [`rank-river/`](rank-river/packet.md) | understand rank movement through time — **graduated, PR #6** |
 | [`threshold-dial/`](threshold-dial/packet.md) | understand the robustness of correlation groups |
 
 Concepts explored but not packeted are listed in `visual-concept-field.md`, which
