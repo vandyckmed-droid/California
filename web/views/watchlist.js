@@ -1,6 +1,6 @@
 import {
-  clearWatchlist, currentRanks, getSnapshot, loadSeries, navigate,
-  rerender, state, syncHash, toggleWatch, watchlist,
+  clearWatchlist, currentRanks, droppedSelections, getSnapshot, goBack, loadSeries,
+  navigate, rerender, state, syncHash, toggleWatch, watchlist,
 } from '../app.js';
 import { completeLinkageGroups, correlationMatrix, simpleReturns } from '../lib/quant.js';
 import { SCORE_LABELS } from '../lib/model.js';
@@ -83,7 +83,7 @@ export function renderWatchlist(app) {
   back.className = 'back';
   back.href = '#';
   back.textContent = '‹ Back to list';
-  back.addEventListener('click', (e) => { e.preventDefault(); navigate(''); });
+  back.addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   head.append(back);
   head.insertAdjacentHTML('beforeend', `<h1>Watchlist <span class="as-of">${watchlist.size}</span></h1>`);
   app.append(head);
@@ -94,16 +94,22 @@ export function renderWatchlist(app) {
     return;
   }
 
-  const symbols = [...watchlist];
+  // The snapshot is the authority on membership. A name whose row is gone has
+  // no index, and every lookup keyed on it would yield `undefined` — sorting
+  // on `ranks[undefined]` gives NaN, which silently scrambles the order rather
+  // than throwing. Stale selections are already dropped at boot; this is the
+  // guard that makes the invariant local to where it is relied on.
+  const known = new Set(snapshot.columns.symbol);
+  const symbols = [...watchlist].filter((s) => known.has(s));
   const body = document.createElement('div');
   body.className = 'wl';
   body.innerHTML = '<p class="loading">Loading prices…</p>';
   app.append(body);
 
   // One request per name, and only for names actually on the list.
-  Promise.all(symbols.map((s) => loadSeries(s).then((f) => ({ s, f })).catch(() => ({ s, f: null }))))
+  return Promise.all(symbols.map((s) => loadSeries(s).then((f) => ({ s, f })).catch(() => ({ s, f: null }))))
     .then((loaded) => {
-      const usable = loaded.filter((x) => x.f?.correlation);
+      const usable = loaded.filter((x) => x.f?.correlation && known.has(x.s));
       const missing = loaded.filter((x) => !x.f?.correlation).map((x) => x.s);
       renderBody(body, snapshot, usable, missing);
     });
@@ -276,6 +282,15 @@ function renderBody(body, snapshot, loaded, missing) {
   if (missing.length > 0) {
     body.insertAdjacentHTML('beforeend',
       `<p class="wl-empty">No price history for ${missing.map(escapeHtml).join(', ')}, so they are excluded from the figures above.</p>`);
+  }
+
+  // Someone who starred a name presumably still cares that it left.
+  const gone = droppedSelections();
+  if (gone.length > 0) {
+    body.insertAdjacentHTML('beforeend',
+      `<p class="wl-empty">${gone.map(escapeHtml).join(', ')} ${gone.length === 1 ? 'is' : 'are'} no longer in the
+       screened universe — below the size or liquidity floor, delisted or acquired — so ${gone.length === 1 ? 'it has' : 'they have'}
+       been removed from your list.</p>`);
   }
 
   const clear = document.createElement('button');

@@ -44,7 +44,7 @@ const snapshotFetch = /const res = await fetch\('data\/snapshot\.json'[^;]*;\s*i
 if (!snapshotFetch.test(js)) throw new Error('snapshot fetch not found — update build-preview.mjs');
 js = js.replace(snapshotFetch, 'snapshot = window.__SNAPSHOT__;');
 
-const seriesFetch = /pending = fetch\(`data\/series\/\$\{encodeURIComponent\(symbol\)\}\.json`\)[\s\S]*?\}\);/;
+const seriesFetch = /pending = fetch\(`data\/series\/\$\{encodeURIComponent\(symbol\)\}\.json`[^)]*\)[\s\S]*?\}\);/;
 if (!seriesFetch.test(js)) throw new Error('series fetch not found — update build-preview.mjs');
 js = js.replace(seriesFetch,
   'pending = window.__SERIES__[symbol] ? Promise.resolve(window.__SERIES__[symbol]) : Promise.reject(new Error("no series"));');

@@ -12,8 +12,20 @@ import { completeLinkageGroups } from './cluster.ts';
  * Two properties matter and both come from doing it here rather than in the
  * browser. It is computed from full-precision closes, so it is more accurate
  * than anything the shipped series could support. And it cannot truncate: a
- * top-N neighbour list silently loses members of a large group, and the
- * largest group in real data has ten names.
+ * top-N neighbour list silently loses members of a large group, and measured
+ * on the shipped 2,572-name universe the largest group is 42 at rho >= 0.60
+ * (28 at 0.65, 27 at 0.70). An earlier version of this comment said ten, from
+ * a much smaller universe; a top-N list would have dropped three quarters of
+ * that group without saying so.
+ *
+ * Group membership is broad — 1,483 of 2,572 names, 58%, sit in some
+ * multi-name group at rho >= 0.60 — which is why nothing marks a row for being
+ * in a group. The marker asks the narrower question: does this row share a
+ * group with something the user actually selected. Measured over random
+ * 20-name selections drawn from the top 300, that marks ~35 rows at the
+ * default 0.65 and ~47 at 0.60, on the order of 1-2% of the list. The
+ * worst case is a single pick inside the largest group, which marks the other
+ * 41 at 0.60 — and that is the finding, not a failure of it.
  *
  * Note this is deliberately a *coarser* notion than the watchlist's grouping
  * over a selection: complete linkage over a subset is not a restriction of

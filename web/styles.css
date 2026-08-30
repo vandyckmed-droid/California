@@ -69,8 +69,11 @@ body {
   scrollbar-width: none; -webkit-overflow-scrolling: touch;
 }
 .chips::-webkit-scrollbar { display: none; }
+/* Full tap height: these sit in a horizontally scrolling row, where the
+   gesture is already ambiguous between tap and pan, so a short target reads
+   as smaller than its box. */
 .chip {
-  flex: 0 0 auto; min-height: 32px; padding: 0 11px; border-radius: 16px;
+  flex: 0 0 auto; min-height: var(--tap); padding: 0 13px; border-radius: 22px;
   border: 1px solid var(--border); background: var(--surface);
   color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer;
 }
@@ -157,7 +160,7 @@ body {
 
 .showrow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .showrow select {
-  flex: 1; min-height: 36px; padding: 0 8px; font: inherit; font-size: 13px;
+  flex: 1; min-height: var(--tap); padding: 0 8px; font: inherit; font-size: 13px;
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text);
 }

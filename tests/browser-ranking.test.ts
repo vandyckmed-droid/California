@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { applyFilters, buildRows, markedRows, ranksFor, scoresFor, SCORE_KEYS } from '../web/lib/model.js';
+import {
+  applyFilters, buildRows, horizonIndexFor, markedRows, METRICS, ranksFor, scoresFor, SCORE_KEYS,
+} from '../web/lib/model.js';
 import { buildViews } from '../src/pipeline/score.ts';
 import { MODES, THRESHOLDS, VOL_FLOOR_ANNUALIZED, type HorizonKey } from '../src/config.ts';
 import type { StockMetrics } from '../src/pipeline/momentum.ts';
@@ -185,5 +187,55 @@ describe('"moves with something you hold" marking', () => {
     const raw = readFileSync('web/data/snapshot.json', 'utf8');
     expect(raw).not.toContain('"display"');
     expect(markedRows(snapshot, ['AAPL'], '0.65')).toBeInstanceOf(Set);
+  });
+});
+
+/**
+ * The displayed volatility must be the quantity the view's score divides by.
+ *
+ * This pins the relationship rather than any value, because the bug it guards
+ * was not a wrong number but a right number from the wrong window: the metric
+ * read a hardcoded `rv[0]`, so the 6-1 and 9-1 views showed 12-1 volatility
+ * beside a ranking built on a different one. 31 names in the shipped snapshot
+ * straddle the floor between those two windows, and for each of them the floor
+ * marker read exactly backwards.
+ */
+describe('the volatility metric follows the view', () => {
+  const vol = METRICS.find((m) => m.key === 'vol')!;
+  const c = snapshot.columns;
+  const floor = snapshot.meta.params.volFloorAnnualized;
+
+  for (const score of ['h12_1', 'h9_1', 'h6_1'] as const) {
+    it(`${score}: shows the divisor the vol-adjusted score uses`, () => {
+      const h = horizonIndexFor(score);
+      const raw = scoresFor(snapshot, score, 'raw');
+      const adjusted = scoresFor(snapshot, score, 'voladj');
+
+      for (let i = 0; i < c.symbol.length; i++) {
+        const shown = vol.get(snapshot, i, 0, h);
+        // The vol-adjusted score is momentum / effectiveVol, so multiplying it
+        // back by the displayed figure must recover the raw score. Stated as a
+        // product rather than a quotient because a name with zero momentum
+        // gives 0/0 either way round.
+        expect(adjusted[i]! * shown).toBeCloseTo(raw[i]!, 9);
+        expect(vol.floored!(snapshot, i, h)).toBe(c.rv[h][i] < floor);
+      }
+    });
+  }
+
+  it('the blend names the horizon it fell back to', () => {
+    // The blend averages three horizons and so has no single divisor. It may
+    // show one, but it may not show it unlabelled.
+    expect(horizonIndexFor('blend')).toBe(0);
+    expect(vol.labelFor!('blend')).toContain('12–1');
+    expect(vol.labelFor!('h6_1')).toContain('6–1');
+  });
+
+  it('at least one name would have been shown the wrong window', () => {
+    // Guards the guard: if no name ever straddles the floor between windows,
+    // the assertions above would pass against the old hardcoded index too.
+    const straddlers = c.symbol.filter((_s: string, i: number) =>
+      (c.rv[0][i] < floor) !== (c.rv[2][i] < floor));
+    expect(straddlers.length).toBeGreaterThan(0);
   });
 });

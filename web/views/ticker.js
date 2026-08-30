@@ -1,5 +1,5 @@
 import {
-  currentRanks, loadSeries, marketCapLabel, navigate, num, pct, state, syncHash,
+  currentRanks, goBack, loadSeries, marketCapLabel, navigate, num, pct, state,
   toggleWatch, watchlist,
 } from '../app.js';
 import { scoresFor, ranksFor } from '../lib/model.js';
@@ -197,11 +197,10 @@ export function renderTicker(app, snapshot, symbol) {
   back.className = 'back';
   back.href = '#';
   back.textContent = '‹ Back to list';
-  back.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (history.length > 1) history.back();
-    else { syncHash(''); location.hash = '/'; }
-  });
+  // `history.length > 1` is true of any tab that has been anywhere else, so it
+  // said "pop" on a cold load straight onto this screen. The depth stamp knows
+  // whether *this app* put an entry behind us.
+  back.addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   head.append(back);
   app.append(head);
 
@@ -241,7 +240,7 @@ export function renderTicker(app, snapshot, symbol) {
   chart.className = 'chart-wrap';
   chart.innerHTML = '<p class="chart-fallback">Loading chart…</p>';
   app.append(chart);
-  loadSeries(symbol)
+  const painted = loadSeries(symbol)
     .then((file) => {
       chart.innerHTML = priceChart(
         { ...sym, series: file.display },
@@ -289,4 +288,8 @@ export function renderTicker(app, snapshot, symbol) {
     <br><a class="tv-link" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(sym, symbol))}"
       target="_blank" rel="noopener noreferrer">Open ${escapeHtml(symbol)} in TradingView &#8599;</a>`;
   app.append(foot);
+
+  // The chart replaces a one-line placeholder, so the page grows after this
+  // returns; scroll restoration has to wait for that.
+  return painted;
 }

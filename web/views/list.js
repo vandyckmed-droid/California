@@ -2,11 +2,24 @@ import {
   clearWatchlist, currentRanks, currentScores, displayValue, getRows, getSnapshot,
   navigate, rerender, state, syncHash, toggleWatch, watchlist,
 } from '../app.js';
-import { applyFilters, markedRows, METRICS, metricByKey, SCORE_LABELS } from '../lib/model.js';
+import {
+  applyFilters, horizonIndexFor, markedRows, METRICS, metricByKey, SCORE_LABELS,
+} from '../lib/model.js';
 
 /** Rows rendered per batch. The rest arrive as you scroll. */
 const PAGE = 120;
 let shown = PAGE;
+
+/**
+ * The search box, kept alive across re-renders.
+ *
+ * Everything else on this screen is cheap to rebuild; a focused text input is
+ * not, because rebuilding it destroys the caret position and any in-flight IME
+ * composition along with it.
+ *
+ * @type {HTMLInputElement | null}
+ */
+let searchInput = null;
 
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -82,31 +95,46 @@ function headerParts(snapshot, matched, total) {
     b.addEventListener('click', () => {
       if (state.sectors.has(sector)) state.sectors.delete(sector);
       else state.sectors.add(sector);
+      b.setAttribute('aria-pressed', String(state.sectors.has(sector)));
       shown = PAGE;
       syncHash();
-      rerender({ keepScroll: true });
+      refreshRows();
     });
     chips.append(b);
   }
   filters.append(chips);
 
-  const search = document.createElement('input');
-  search.className = 'search';
-  search.type = 'search';
-  search.placeholder = 'Symbol or company';
-  search.value = state.search;
-  search.addEventListener('input', () => {
-    state.search = search.value;
-    shown = PAGE;
-    syncHash();
-    // Keep the caret and the keyboard: re-render without jumping to the top.
-    rerender({ keepScroll: true });
-    const next = document.querySelector('.search');
-    if (next instanceof HTMLInputElement) {
-      next.focus();
-      next.setSelectionRange(next.value.length, next.value.length);
-    }
-  });
+  // Reused across re-renders rather than rebuilt.
+  //
+  // Rebuilding it per keystroke and then reconstructing focus by hand forced
+  // the caret to the end of the value, so fixing a typo mid-string threw the
+  // caret to the end after one character; it also dropped any pending IME
+  // composition, which makes the box unusable for a language that composes
+  // characters — and company-name search is the reason this box exists. The
+  // element's value is already the source of truth, so it never needed
+  // rebuilding to stay correct.
+  const search = searchInput ?? document.createElement('input');
+  if (!searchInput) {
+    search.className = 'search';
+    search.type = 'search';
+    search.placeholder = 'Symbol or company';
+    search.value = state.search;
+    search.addEventListener('input', () => {
+      state.search = search.value;
+      shown = PAGE;
+      syncHash();
+      // Rows only. A full re-render calls `replaceChildren`, which detaches
+      // this input and so blurs it — the caret and any pending IME composition
+      // go with it, and reconstructing them by hand is what put the caret at
+      // the end. Leaving the header untouched means nothing to reconstruct.
+      refreshRows();
+    });
+    searchInput = search;
+  } else if (document.activeElement !== search) {
+    // Only write into it when it is not being typed in: assigning `value` to a
+    // focused input collapses the selection.
+    search.value = state.search;
+  }
   filters.append(search);
 
   // One number per row, chosen here. Everything else lives on the ticker
@@ -118,23 +146,23 @@ function headerParts(snapshot, matched, total) {
   for (const m of METRICS) {
     const opt = document.createElement('option');
     opt.value = m.key;
-    opt.textContent = m.label;
+    // A per-horizon metric names its horizon, so the number on the row is
+    // always attributable to a window rather than to "volatility" in general.
+    opt.textContent = m.labelFor?.(state.score) ?? m.label;
     opt.selected = m.key === state.metric;
     select.append(opt);
   }
   select.addEventListener('change', () => {
     state.metric = select.value;
     syncHash();
-    rerender({ keepScroll: true });
+    refreshRows();
   });
   showRow.append(Object.assign(document.createElement('span'), { textContent: 'Show' }), select);
   filters.append(showRow);
 
   const sub = document.createElement('p');
   sub.className = 'sub';
-  sub.innerHTML = matched !== total
-    ? `<b>${matched.toLocaleString()}</b> of ${total.toLocaleString()} · ranks stay universe-wide`
-    : `<b>${total.toLocaleString()}</b> eligible names`;
+  sub.innerHTML = countText(matched, total);
   filters.append(sub);
 
   return [head, viewbar, filters];
@@ -146,11 +174,12 @@ function stockRow(snapshot, row, rank, score, marked) {
   wrap.className = `stock${selected ? ' on' : ''}`;
 
   const metric = metricByKey(state.metric);
-  const raw = metric.get(snapshot, row.i, score);
+  const h = horizonIndexFor(state.score);
+  const raw = metric.get(snapshot, row.i, score, h);
   const text = metric.key === 'score' ? displayValue(score).text : metric.fmt(raw);
   const tone = metric.key === 'score' || metric.key.startsWith('h')
     ? (raw >= 0 ? ' pos' : ' neg') : '';
-  const floored = metric.floored?.(snapshot, row.i) ? '<span class="floor-mark">floor</span>' : '';
+  const floored = metric.floored?.(snapshot, row.i, h) ? '<span class="floor-mark">floor</span>' : '';
 
   const open = document.createElement('a');
   open.className = 'open';
@@ -172,7 +201,7 @@ function stockRow(snapshot, row, rank, score, marked) {
   check.setAttribute('aria-label', `${selected ? 'Remove' : 'Add'} ${row.symbol}`);
   check.addEventListener('click', () => {
     toggleWatch(row.symbol);
-    rerender({ keepScroll: true });
+    refreshRows();
   });
 
   wrap.append(open, check);
@@ -192,7 +221,7 @@ function actionBar() {
   clear.type = 'button';
   clear.className = 'linkish';
   clear.textContent = 'Clear';
-  clear.addEventListener('click', () => { clearWatchlist(); rerender({ keepScroll: true }); });
+  clear.addEventListener('click', () => { clearWatchlist(); refreshRows(); });
 
   const go = document.createElement('button');
   go.type = 'button';
@@ -204,25 +233,32 @@ function actionBar() {
   return bar;
 }
 
-export function renderList(app) {
-  const snapshot = getSnapshot();
-  const rows = getRows();
-  const ranks = currentRanks();
-  const scores = currentScores();
-  const matches = applyFilters(rows, ranks, {
+/** The rows the current filters admit, in universe rank order. */
+function currentMatches() {
+  return applyFilters(getRows(), currentRanks(), {
     sectors: state.sectors,
     minMarketCap: state.minMarketCap,
     search: state.search,
   });
+}
 
-  app.replaceChildren();
-  app.append(...headerParts(snapshot, matches.length, rows.length));
+function countText(matched, total) {
+  return matched !== total
+    ? `<b>${matched.toLocaleString()}</b> of ${total.toLocaleString()} · ranks stay universe-wide`
+    : `<b>${total.toLocaleString()}</b> eligible names`;
+}
+
+/** Fills the rows container: the batch, the scroll sentinel, and the footer. */
+function paintRows(body, snapshot, matches) {
+  const ranks = currentRanks();
+  const scores = currentScores();
+  body.replaceChildren();
 
   if (matches.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'loading';
     empty.textContent = 'No names match these filters.';
-    app.append(empty);
+    body.append(empty);
     return;
   }
 
@@ -235,7 +271,7 @@ export function renderList(app) {
   for (const row of batch) {
     list.append(stockRow(snapshot, row, ranks[row.i], scores[row.i], marked.has(row.i)));
   }
-  app.append(list);
+  body.append(list);
 
   if (matches.length > batch.length) {
     // 2,300 rows in the DOM would make scrolling stutter on a phone; the rest
@@ -243,12 +279,12 @@ export function renderList(app) {
     const sentinel = document.createElement('div');
     sentinel.className = 'more';
     sentinel.textContent = `${matches.length - batch.length} more`;
-    app.append(sentinel);
+    body.append(sentinel);
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
       observer.disconnect();
       shown += PAGE;
-      rerender({ keepScroll: true });
+      refreshRows();
     }, { rootMargin: '400px' });
     observer.observe(sentinel);
   }
@@ -259,12 +295,47 @@ export function renderList(app) {
     from ${snapshot.meta.universe.screened.toLocaleString()} screened listings.
     Filtering hides rows; it never renumbers them.<br>
     Data: Financial Modeling Prep · <code>${snapshot.meta.dataHash.slice(0, 16)}</code>`;
-  app.append(foot);
+  body.append(foot);
+}
 
+/**
+ * Repaints the rows and the count, leaving the header in place.
+ *
+ * Used by anything that changes only which rows qualify. Keeping the header's
+ * DOM untouched is what lets a focused control survive the update — and it is
+ * also the cheaper half of the work.
+ */
+export function refreshRows() {
+  const body = document.querySelector('.listbody');
+  if (!(body instanceof HTMLElement)) return;
+  const matches = currentMatches();
+  const sub = document.querySelector('.sub');
+  if (sub) sub.innerHTML = countText(matches.length, getRows().length);
+  paintRows(body, getSnapshot(), matches);
+  paintActionBar();
+}
+
+/** The bar exists only while something is selected. */
+function paintActionBar() {
+  document.querySelector('.actionbar')?.remove();
   if (watchlist.size > 0) {
-    app.append(actionBar());
+    document.getElementById('app')?.append(actionBar());
     document.body.classList.add('has-bar');
   } else {
     document.body.classList.remove('has-bar');
   }
+}
+
+export function renderList(app) {
+  const snapshot = getSnapshot();
+  const matches = currentMatches();
+
+  app.replaceChildren();
+  app.append(...headerParts(snapshot, matches.length, getRows().length));
+
+  const body = document.createElement('div');
+  body.className = 'listbody';
+  app.append(body);
+  paintRows(body, snapshot, matches);
+  paintActionBar();
 }

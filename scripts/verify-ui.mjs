@@ -60,6 +60,36 @@ const base = `http://localhost:${port}/`;
 const snapshot = JSON.parse(readFileSync('web/data/snapshot.json', 'utf8'));
 const TOTAL = snapshot.columns.symbol.length;
 
+/**
+ * Every visible interactive control on the screen that is under the 44px floor.
+ *
+ * Deliberately a sweep over what is interactive rather than a list of
+ * selectors: an enumerated check exempts every control added after it was
+ * written, and goes stale exactly when the UI is changing fastest. It reports
+ * the property as verified while new controls sit below the floor.
+ *
+ * The one stated exemption is a link that flows inline inside running text —
+ * a footnote link takes the line height of the prose around it, and padding it
+ * to 44px would break the paragraph. Anything laid out as a control, including
+ * a block-level or inline-block link, has to clear the floor.
+ */
+const tapAudit = (page) => page.evaluate(() => {
+  const SEL = 'button, select, textarea, [role="button"], a[href], input:not([type="hidden"])';
+  const bad = [];
+  for (const el of document.querySelectorAll(SEL)) {
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    if (el.tagName === 'A' && cs.display === 'inline') continue;
+    if (r.height < 44) {
+      const id = `${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).split(' ')[0]}` : ''}`;
+      bad.push(`${id} ${Math.round(r.height)}px`);
+    }
+  }
+  return [...new Set(bad)];
+});
+
 /** Every series URL the page has asked for, in order, across a whole context. */
 const newPage = async (colorScheme = 'light') => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme });
@@ -82,18 +112,17 @@ for (const score of ['h12_1', 'h9_1', 'h6_1', 'blend']) {
     const r = await page.evaluate(() => ({
       rows: document.querySelectorAll('.stock').length,
       ranks: [...document.querySelectorAll('.rank')].map((e) => Number(e.textContent)),
-      minTap: Math.min(...[...document.querySelectorAll('.stock, .seg button, .check')]
-        .map((e) => e.getBoundingClientRect().height)),
       hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       total: Number((document.querySelector('.sub b')?.textContent ?? '0').replace(/,/g, '')),
     }));
+    const small = await tapAudit(page);
     const view = `${score}|${mode}`;
     // Only the first page is in the DOM; the rest arrive on scroll.
     check(`${view}: first page renders`, r.rows > 0 && r.rows <= 200, `${r.rows} rows`);
     check(`${view}: ranks run 1..n in order`,
       r.ranks[0] === 1 && r.ranks.every((v, i) => i === 0 || v > r.ranks[i - 1]), `first ${r.ranks[0]}`);
     check(`${view}: whole universe is counted`, r.total === TOTAL, `${r.total} vs ${TOTAL}`);
-    check(`${view}: tap targets >= 44px`, r.minTap >= 44, `min ${r.minTap}px`);
+    check(`${view}: every control is >= 44px`, small.length === 0, small.join(', '));
     check(`${view}: no horizontal scroll`, !r.hScroll);
   }
 }
@@ -216,6 +245,67 @@ check('metric: changing it never reorders the list',
 }
 await page.selectOption('select.metric', 'score');
 
+// ---- the volatility metric follows the view --------------------------------
+// Regression: a hardcoded rv[0] showed 12-1 volatility beside a 6-1 ranking,
+// which inverted the floor mark for the 31 names that straddle the floor
+// between those windows.
+{
+  const straddler = snapshot.columns.symbol.find((_s, i) =>
+    (snapshot.columns.rv[0][i] < snapshot.meta.params.volFloorAnnualized)
+    !== (snapshot.columns.rv[2][i] < snapshot.meta.params.volFloorAnnualized));
+  const seen = {};
+  for (const score of ['h12_1', 'h6_1']) {
+    await page.goto(`${base}#/?score=${score}&mode=voladj&metric=vol&search=${straddler}`,
+      { waitUntil: 'networkidle' });
+    await page.waitForFunction((sym) =>
+      document.querySelector('.stock .sym')?.textContent?.trim() === sym, straddler);
+    seen[score] = await page.evaluate(() => ({
+      // The floor marker is a child span, so read the number, not the node.
+      value: (document.querySelector('.stock .val')?.textContent ?? '').match(/-?\d+%/)?.[0] ?? '',
+      floored: !!document.querySelector('.stock .floor-mark'),
+      label: document.querySelector('select.metric option[value=vol]')?.textContent ?? '',
+    }));
+  }
+  const i = snapshot.columns.symbol.indexOf(straddler);
+  const expect12 = Math.max(snapshot.columns.rv[0][i], snapshot.meta.params.volFloorAnnualized);
+  const expect6 = Math.max(snapshot.columns.rv[2][i], snapshot.meta.params.volFloorAnnualized);
+  check(`vol metric: ${straddler} shows its 12-1 volatility in the 12-1 view`,
+    seen.h12_1.value === `${Math.round(expect12 * 100)}%`, `${seen.h12_1.value} vs ${expect12}`);
+  check(`vol metric: ${straddler} shows its 6-1 volatility in the 6-1 view`,
+    seen.h6_1.value === `${Math.round(expect6 * 100)}%`, `${seen.h6_1.value} vs ${expect6}`);
+  check('vol metric: the floor mark tracks the viewed window',
+    seen.h12_1.floored === (snapshot.columns.rv[0][i] < snapshot.meta.params.volFloorAnnualized)
+    && seen.h6_1.floored === (snapshot.columns.rv[2][i] < snapshot.meta.params.volFloorAnnualized),
+    `12-1 ${seen.h12_1.floored} / 6-1 ${seen.h6_1.floored}`);
+  check('vol metric: the label names the window it is showing',
+    seen.h12_1.label.includes('12') && seen.h6_1.label.includes('6'),
+    `${seen.h12_1.label} / ${seen.h6_1.label}`);
+}
+
+// ---- the search caret stays where you put it -------------------------------
+await page.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.stock');
+// Start from an empty box: the block above left a symbol in it via the hash.
+await page.fill('.search', '');
+await page.click('.search');
+await page.type('.search', 'AAPL');
+// Put the caret after "AAP" and fix a typo there, as you would mid-string.
+await page.evaluate(() => {
+  const el = document.querySelector('.search');
+  el.setSelectionRange(3, 3);
+});
+await page.keyboard.type('X');
+const caret = await page.evaluate(() => {
+  const el = document.querySelector('.search');
+  return { value: el.value, start: el.selectionStart, focused: document.activeElement === el };
+});
+check('search: typing mid-string inserts where the caret is',
+  caret.value === 'AAPXL', caret.value);
+check('search: the caret does not jump to the end', caret.start === 4, `at ${caret.start}`);
+check('search: the box keeps focus across re-renders', caret.focused, String(caret.focused));
+await page.fill('.search', '');
+await page.waitForFunction(() => document.querySelectorAll('.stock').length >= 100);
+
 // ---- selection, the action bar, and persistence ----------------------------
 const picks = await page.evaluate(async () => {
   const checks = [...document.querySelectorAll('.stock .check')].slice(0, 5);
@@ -277,10 +367,9 @@ const risk = await wl.evaluate(() => {
     listed: document.querySelectorAll('.rows.flat .stock').length,
     thresholds: [...document.querySelectorAll('.wl-toggle.small button')].map((b) => b.textContent.trim()),
     hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    minTap: Math.min(...[...document.querySelectorAll('.wl-toggle button, .wl-clear, .rows.flat .stock')]
-      .map((e) => e.getBoundingClientRect().height)),
   };
 });
+const wlSmall = await tapAudit(wl);
 
 check('watchlist: one row per selected name', risk.names.length === picks.length, risk.names.join(','));
 check('watchlist: rows are in universe rank order',
@@ -300,7 +389,7 @@ check('watchlist: the list itself is shown and removable', risk.listed === picks
 check('watchlist: the threshold control lives here', risk.thresholds.length === snapshot.clusters.thresholds.length,
   risk.thresholds.join(' '));
 check('watchlist: no horizontal scroll', !risk.hScroll);
-check('watchlist: tap targets >= 44px', risk.minTap >= 44, `min ${risk.minTap}px`);
+check('watchlist: every control is >= 44px', wlSmall.length === 0, wlSmall.join(', '));
 
 // The size argument in one assertion: n names cost n requests, and revisiting
 // costs none. Anything that batches or refetches shows up here.
@@ -357,6 +446,89 @@ await solo.reload({ waitUntil: 'networkidle' });
 await solo.waitForSelector('.loading');
 const empty = await solo.evaluate(() => document.querySelector('.loading')?.textContent ?? '');
 check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
+
+// ---- the watchlist keeps your place, and Back pops -------------------------
+{
+  await wl.goto(`${base}#/watchlist?score=h12_1&mode=raw&threshold=0.65`);
+  await wl.reload({ waitUntil: 'networkidle' });
+  await wl.waitForSelector('.wl .panel', { timeout: 20000 });
+  await wl.evaluate(() => window.scrollTo(0, 400));
+  const before = await wl.evaluate(() => window.scrollY);
+  // Name the threshold rather than "the first unpressed one" — there are three
+  // buttons and two of them are unpressed.
+  await wl.evaluate(() => {
+    const b = [...document.querySelectorAll('.wl-toggle.small button')]
+      .find((x) => x.textContent.includes('0.70'));
+    b.click();
+  });
+  await wl.waitForFunction(() =>
+    document.querySelector('.wl-toggle.small button[aria-pressed=true]')?.textContent?.includes('0.70'));
+  // The screen paints a placeholder first and its content a fetch later, so a
+  // restore that ran on the synchronous return would scroll a one-line page.
+  await wl.waitForFunction(() => window.scrollY > 100, null, { timeout: 5000 }).catch(() => {});
+  const after = await wl.evaluate(() => window.scrollY);
+  check('watchlist: changing the threshold keeps your place',
+    before > 0 && Math.abs(after - before) < 80, `${before} → ${after}`);
+}
+
+{
+  // Back must pop, not push: otherwise the device back gesture returns *into*
+  // the screen you just left.
+  const nav = await newPage();
+  await nav.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await nav.evaluate((syms) => localStorage.setItem('california.watchlist.v1', JSON.stringify(syms)), picks);
+  await nav.reload({ waitUntil: 'networkidle' });
+  await nav.waitForSelector('.actionbar');
+  await nav.click('.actionbar .primary');
+  await nav.waitForSelector('.wl', { timeout: 20000 });
+  const depth = await nav.evaluate(() => history.length);
+  await nav.click('.back');
+  await nav.waitForSelector('.stock');
+  const afterBack = await nav.evaluate(() => history.length);
+  check('watchlist: Back pops rather than pushing a new entry',
+    afterBack === depth, `${depth} → ${afterBack}`);
+  // And the device gesture from there must not land back on the watchlist.
+  await nav.goForward().catch(() => {});
+  await nav.goBack().catch(() => {});
+  await nav.waitForSelector('.stock, .wl', { timeout: 8000 });
+  const where = await nav.evaluate(() => (document.querySelector('.wl') ? 'watchlist' : 'list'));
+  check('watchlist: the device back gesture escapes the screen', where === 'list', where);
+
+  // A cold load straight onto the watchlist has nothing to pop; Back must
+  // still reach the list rather than leaving the site.
+  const cold = await newPage();
+  await cold.goto(`${base}#/watchlist?score=h12_1&mode=raw&threshold=0.65`);
+  await cold.evaluate((syms) => localStorage.setItem('california.watchlist.v1', JSON.stringify(syms)), picks);
+  await cold.reload({ waitUntil: 'networkidle' });
+  await cold.waitForSelector('.wl', { timeout: 20000 });
+  await cold.click('.back');
+  await cold.waitForSelector('.stock', { timeout: 8000 });
+  check('watchlist: Back works on a cold load with no history behind it', true);
+}
+
+// ---- a saved name that left the universe -----------------------------------
+{
+  const stale = await newPage();
+  await stale.goto(base, { waitUntil: 'networkidle' });
+  await stale.evaluate((keep) =>
+    localStorage.setItem('california.watchlist.v1', JSON.stringify([keep, 'ZZDELISTED'])), picks[0]);
+  await stale.goto(`${base}#/watchlist?score=h12_1&mode=raw&threshold=0.65`);
+  await stale.reload({ waitUntil: 'networkidle' });
+  await stale.waitForSelector('.wl .panel', { timeout: 20000 });
+  const r = await stale.evaluate(() => ({
+    html: document.querySelector('.wl')?.innerHTML ?? '',
+    rows: [...document.querySelectorAll('.rows.flat .stock')].map((s) => s.querySelector('.sym').textContent.trim()),
+    ranks: [...document.querySelectorAll('.rows.flat .rank')].map((e) => e.textContent.trim()),
+    stored: JSON.parse(localStorage.getItem('california.watchlist.v1') ?? '[]'),
+  }));
+  check('stale pick: no #undefined row and no "undefined" name',
+    !r.ranks.includes('undefined') && !/>undefined</.test(r.html), r.ranks.join(','));
+  check('stale pick: the live name still renders', r.rows.length === 1 && r.rows[0] === picks[0], r.rows.join(','));
+  check('stale pick: it is pruned from storage rather than failing again',
+    r.stored.length === 1 && r.stored[0] === picks[0], r.stored.join(','));
+  check('stale pick: the user is told, not left guessing',
+    /ZZDELISTED/.test(r.html) && /no longer in the/i.test(r.html), 'no notice shown');
+}
 
 // ---- per-ticker screen -----------------------------------------------------
 const top = snapshot.columns.symbol[0];

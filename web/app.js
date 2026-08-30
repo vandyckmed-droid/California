@@ -70,6 +70,30 @@ export function clearWatchlist() {
   persistWatchlist();
 }
 
+/** Selections the current snapshot no longer contains, dropped at boot. */
+let dropped = /** @type {string[]} */ ([]);
+export const droppedSelections = () => dropped;
+
+/**
+ * Repairs the saved list against the snapshot.
+ *
+ * The list persists indefinitely but the universe is rebuilt every weekday,
+ * and names leave it routinely — below the cap, below the liquidity gate,
+ * delisted, acquired. A symbol that outlived its row has no index, so every
+ * lookup keyed on it yields `undefined` and the failure surfaces as garbage
+ * rows rather than as an error. Dropping them here means the state repairs
+ * itself once instead of failing again on every open.
+ *
+ * @param {Iterable<string>} known
+ */
+function pruneWatchlist(known) {
+  const set = known instanceof Set ? known : new Set(known);
+  dropped = [...watchlist].filter((s) => !set.has(s));
+  if (dropped.length === 0) return;
+  for (const s of dropped) watchlist.delete(s);
+  persistWatchlist();
+}
+
 /** @type {any} */
 let snapshot = null;
 /** @type {ReturnType<typeof buildRows>} */
@@ -122,7 +146,10 @@ const seriesCache = new Map();
 export function loadSeries(symbol) {
   let pending = seriesCache.get(symbol);
   if (!pending) {
-    pending = fetch(`data/series/${encodeURIComponent(symbol)}.json`).then((r) => {
+    // Revalidated like the snapshot is. Left to the default the browser can
+    // hold a stale series for a name the fresh snapshot has already dropped —
+    // the fetch then succeeds and the bad row looks valid all the way down.
+    pending = fetch(`data/series/${encodeURIComponent(symbol)}.json`, { cache: 'no-cache' }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     });
@@ -189,22 +216,53 @@ function queryString() {
 /** Rewrites the hash without pushing history, for control changes. */
 export function syncHash(route = '') {
   const next = `#/${route}?${queryString()}`;
-  if (location.hash !== next) history.replaceState(null, '', next);
+  // Carries the existing state forward: dropping it here would erase the depth
+  // stamp below on every control change, and Back would stop popping.
+  if (location.hash !== next) history.replaceState(history.state, '', next);
 }
 
-/** Navigates, pushing history so Back returns to the list. */
+/**
+ * Navigates, pushing history so Back returns to the list, and stamps how deep
+ * into the app this entry is.
+ *
+ * The depth is what lets an in-app Back link *pop* rather than push. Pushing a
+ * second entry to go "back" leaves the device's own back gesture returning
+ * into the screen you just left, which on a phone is the button people
+ * actually use.
+ */
 export function navigate(route) {
+  const depth = (history.state?.depth ?? 0) + 1;
   location.hash = `/${route}?${queryString()}`;
+  history.replaceState({ depth }, '');
+}
+
+/**
+ * The in-app Back link: pop when there is somewhere to pop to, navigate when
+ * there is not — a shared link or a bookmark opens straight onto a screen with
+ * no history behind it.
+ */
+export function goBack() {
+  if ((history.state?.depth ?? 0) > 0) history.back();
+  else navigate('');
 }
 
 export function rerender({ keepScroll = false } = {}) {
   const route = parseHash();
   clampState();
   const y = window.scrollY;
-  if (route === 'watchlist') renderWatchlist(app);
-  else if (route && route !== '') renderTicker(app, snapshot, decodeURIComponent(route));
-  else renderList(app);
-  window.scrollTo(0, keepScroll ? y : 0);
+  const restore = () => window.scrollTo(0, keepScroll ? y : 0);
+
+  // The watchlist and the ticker paint a placeholder synchronously and their
+  // real content a fetch later. Restoring only on the synchronous return
+  // scrolls a one-line document, which clamps to 0 — so `keepScroll` silently
+  // did nothing on exactly the screen where you are most likely to be
+  // mid-scroll. Restore again once the content is in the DOM.
+  let painted;
+  if (route === 'watchlist') painted = renderWatchlist(app);
+  else if (route && route !== '') painted = renderTicker(app, snapshot, decodeURIComponent(route));
+  else painted = renderList(app);
+  restore();
+  if (painted && typeof painted.then === 'function') painted.then(restore, restore);
 }
 
 async function boot() {
@@ -218,6 +276,7 @@ async function boot() {
     return;
   }
   rows = buildRows(snapshot);
+  pruneWatchlist(snapshot.columns.symbol);
   window.addEventListener('hashchange', () => rerender());
   rerender();
 }

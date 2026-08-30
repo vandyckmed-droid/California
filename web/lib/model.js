@@ -130,12 +130,35 @@ export function applyFilters(rows, ranks, filters) {
 }
 
 /**
+ * Which horizon a view's score is built from.
+ *
+ * The blend has no single horizon — it averages three — so it reports 12-1 and
+ * anything displaying a per-horizon figure has to say which one it showed.
+ *
+ * @param {string} scoreKey
+ * @returns {number}
+ */
+export function horizonIndexFor(scoreKey) {
+  const h = HORIZONS.indexOf(scoreKey);
+  return h < 0 ? 0 : h;
+}
+
+/** Which window a view's volatility figure is drawn from, for the label. */
+const VOL_LABELS = /** @type {Record<string, string>} */ ({
+  h12_1: '12–1', h9_1: '9–1', h6_1: '6–1', blend: '12–1',
+});
+
+/**
  * The metrics a row can display, one at a time.
  *
  * The list shows one number, not four — everything is available on the ticker
  * screen, so the list stays scannable. Adding a metric is one entry here.
  *
- * @type {{key: string, label: string, get: (s: any, i: number, score: number) => number, fmt: (v: number) => string, floored?: (s: any, i: number) => boolean}[]}
+ * `get` and `floored` take the active view's horizon index, because a metric
+ * that reads a per-horizon column has to read the *viewed* horizon: a fixed
+ * index shows one window's number beside another window's ranking.
+ *
+ * @type {{key: string, label: string, labelFor?: (scoreKey: string) => string, get: (s: any, i: number, score: number, h: number) => number, fmt: (v: number) => string, floored?: (s: any, i: number, h: number) => boolean}[]}
  */
 export const METRICS = [
   {
@@ -150,12 +173,16 @@ export const METRICS = [
   })),
   {
     key: 'vol', label: 'Volatility',
-    // The floored figure, since that is what the vol-adjusted ranking divides
-    // by. Rows where the floor is binding are marked, and the ticker screen
-    // shows realized and effective side by side.
-    get: (s, i) => Math.max(s.columns.rv[0][i], s.meta.params.volFloorAnnualized),
+    // The floored figure for the *viewed* horizon, since that is what the
+    // vol-adjusted ranking divides by. Reading a fixed `rv[0]` here showed the
+    // 12-1 volatility beside a 6-1 ranking, which inverted the floor mark for
+    // every name that straddles the floor between the two windows. The label
+    // names the horizon so the number is always attributable — including under
+    // the blend, which has no single divisor of its own.
+    labelFor: (scoreKey) => `Volatility (${VOL_LABELS[scoreKey] ?? VOL_LABELS.h12_1})`,
+    get: (s, i, _score, h) => Math.max(s.columns.rv[h][i], s.meta.params.volFloorAnnualized),
     fmt: (v) => `${(v * 100).toFixed(0)}%`,
-    floored: (s, i) => s.columns.rv[0][i] < s.meta.params.volFloorAnnualized,
+    floored: (s, i, h) => s.columns.rv[h][i] < s.meta.params.volFloorAnnualized,
   },
   {
     key: 'marketCap', label: 'Market cap',
