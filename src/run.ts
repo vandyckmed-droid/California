@@ -218,8 +218,23 @@ async function main(): Promise<void> {
 
   assertInvariants(views, groupsByView);
 
+  // The charted span covers the longest horizon through the latest session, so
+  // the detail screen can draw every horizon window on one line.
+  const chartFrom = L - MAX_LOOKBACK;
+  const chartDates = calendar.slice(chartFrom, L + 1);
+  const chartSeries = new Map<string, number[]>();
+  for (const m of metrics) {
+    const series = aligned.get(m.symbol);
+    if (!series) continue;
+    const closes: number[] = [];
+    for (let i = chartFrom; i <= L; i++) closes.push(series.closes[i] as number);
+    chartSeries.set(m.symbol, closes);
+  }
+
   const snapshot = buildSnapshot({
     asOf,
+    chartSeries,
+    chartDates,
     calendarLength: calendar.length,
     anchors,
     members: memberBySymbol,
