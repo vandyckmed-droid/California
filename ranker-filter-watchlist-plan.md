@@ -45,7 +45,7 @@ Filtering a real universe means carrying more than 100 names. Measured, scaled f
 
 | file | contents | size | loaded |
 |---|---|---|---|
-| `web/data/snapshot.json` | meta + one row per eligible name: name, sector, exchange, price, market cap, per horizon `{momentum, realizedVol, zRaw, zVol}`, and each name's top correlated neighbours | **~120 KB gz** | immediately |
+| `web/data/snapshot.json` | meta + one row per eligible name: name, sector, exchange, price, market cap, per horizon `{momentum, realizedVol, zRaw, zVol}`, plus cluster ids as three parallel arrays | **~118 KB gz** | immediately |
 | `web/data/series/<SYMBOL>.json` | that one name's display series **and** its correlation-grade returns | **~700 B** | on tapping or starring that name |
 
 The home screen therefore covers **all 2,320 names** for roughly what 100 names cost today, and opening one chart costs 700 bytes rather than a bundle of every other name's prices. No background warming is needed — the unit of fetch is already the unit of use.
@@ -78,9 +78,20 @@ So: **keep 1 char/day for the chart, use 2 chars/day over the 126-session window
 
 Applying correlation grade to the whole universe in one bundle would cost ~900 KB gzipped — the payload this plan opens by rejecting. It is affordable only because **correlation is needed solely for names the user picked**: at ~332 bytes per name, a 30-name watchlist is **9.7 KB**, smaller than the bundle it replaces by a factor of 36.
 
-### Repository cost
+### Repository cost — measured, not hedged
 
-Per-symbol files mean ~2,320 small files rewritten by each scheduled run. To offset, the pipeline stops writing the dated whole-snapshot archive (`web/data/archive/YYYY-MM-DD.json`, 387 KB per day for no current consumer) and archives only `snapshot.json`. Growth is a known cost worth revisiting if it becomes a problem; the alternative — generating series at build time and never committing them — is available but would leave a `push`-triggered deploy serving a site with no charts.
+Per-symbol files mean ~2,320 small files rewritten by each scheduled run. Simulated across successive daily runs with prices moving and the per-series normalization re-scaling as new highs and lows enter the window:
+
+**~381 KB of packed history per run, ≈ 93 MB/year at 250 weekday runs.**
+
+That is fine — roughly a couple of times the current rate, partly offset by dropping the dated whole-snapshot archive (`web/data/archive/YYYY-MM-DD.json`, 387 KB/day for no current consumer), with years of runway.
+
+Two things worth recording, because the intuition here cuts the wrong way:
+
+- **Why it is low:** the files are individually tiny and mutually similar, so git's delta compression handles them well. Estimating this with *random* content gives ≈ 2.3 GB/year — 25× worse — purely because random data cannot be delta-compressed. Anyone re-checking this with synthetic data will get the scary number and reach for a fix that is not needed.
+- **What would change the answer:** an encoding whose bytes churn completely between runs. The current per-series normalization is nearly stable day to day — a new high or low re-scales every character in *that one file*, not all of them. Normalizing against something global, or packing the series into a binary blob, would forfeit that property and put growth back near the random-data figure. A constraint for whoever next optimizes the encoding.
+
+The build-time alternative — generating series in CI and never committing them — was rejected because a `push`-triggered deploy would then serve a site with no charts, and site freshness would be coupled to the last run that had working FMP credentials.
 
 ## Ranking moves to the browser
 
@@ -143,15 +154,30 @@ Empty state explains how to add names. Selection persists in `localStorage`.
 
 Plus one addition: an add/remove-from-watchlist button.
 
-### "Same trade" marking — precomputed, not client-side
+### "Same trade" marking — precomputed cluster ids
 
 The automatic grouping leaves the default screen, and that is the right trade: structure over a list you did not choose is interesting, structure over a basket you did choose is actionable.
 
-The first draft proposed restoring the lost insight as a client-side marker on rows correlating with your picks, listed last as "droppable". That had it backwards. Every other part of the watchlist needs correlation data **only for selected names**, which is what makes per-symbol fetching viable; a marker over the ranked list needs to know whether *any of 2,320 rows* correlates with a pick — correlation-grade data for the whole universe, the ~900 KB payload this plan exists to avoid. The cheapest-looking item was the one forcing the expensive design.
+The first draft proposed a client-side marker on rows correlating with your picks, listed last as "droppable". That had it backwards. Every other part of the watchlist needs correlation data **only for selected names**, which is what makes per-symbol fetching viable; a marker over the ranked list needs to know whether *any of 2,320 rows* correlates with a pick — correlation-grade data for the whole universe, the ~900 KB payload this plan exists to avoid. The cheapest-looking item was the one forcing the expensive design.
 
-Instead, **precompute it in the pipeline**, where full-precision prices already exist: each name carries its top few neighbours above ρ 0.60, as `[symbol, ρ]` pairs in `snapshot.json`. A few dozen bytes per row.
+The second draft moved it into the pipeline as per-name neighbour lists. Right instinct, wrong representation: ticker strings are near-random four-character tokens that compress poorly, and there are 2,320 × *n* of them. Measured on the real ticker set:
 
-This is strictly better than the client-side marker on every axis. It is more accurate (full precision, not quantized), needs no series loaded, works before any fetch resolves, and — because it does not depend on having selected anything — it restores the *original* insight more faithfully than the marker would: "nine of your top 100 are one semicap trade" is a statement about the ranked list, visible on arrival.
+| representation | raw | gzipped | snapshot total | |
+|---|---|---|---|---|
+| neighbour lists, top-3 | 116 KB | 38 KB | ~152 KB | over budget |
+| neighbour lists, top-5 | 182 KB | 58 KB | ~172 KB | over budget |
+| neighbour lists, top-8 | 279 KB | 87 KB | ~201 KB | over budget |
+| **cluster ids, 3 thresholds** | **20 KB** | **3.7 KB** | **~118 KB** | **fits** |
+
+So: **precompute complete-linkage groups over the eligible universe at each threshold and store one small group id per row per threshold.** The pipeline already has the clustering function and already runs it; all-pairs correlation over 2,320 names takes well under a second, so the precomputation is free next to a single fetch.
+
+Marking becomes set membership — collect the group ids of the selection, mark any row sharing one. No ρ comparison in the browser, no series loaded, resolved before any fetch.
+
+It is also *more correct* than neighbour lists, which silently truncate: the largest group in the committed data has **10 names**, so even a top-8 list cannot represent it, and the marker would be quietly incomplete on exactly the concentrated cluster that motivates the feature. Cluster ids have no truncation and inherit the complete-linkage invariant the pipeline already asserts.
+
+**Encode as three parallel arrays in the snapshot's existing symbol order, not as an object keyed by ticker.** The keyed form costs 19.3 KB gzipped against 3.7 KB — a 5× penalty, almost all of it re-listing 2,320 ticker strings that the snapshot already contains.
+
+**Stated semantic caveat:** universe-wide grouping is coarser than the watchlist's grouping over a selection, and the two can disagree at the edges, because complete linkage over a subset is not a restriction of complete linkage over the whole. A row marked on the home screen may land in a different group once starred. That is an acceptable trade for a marker that costs 3.7 KB and needs no fetch, but it makes the honest wording *"moves with something you hold"* rather than *"will group with it"*.
 
 ---
 
@@ -159,7 +185,7 @@ This is strictly better than the client-side marker on every axis. It is more ac
 
 | file | change |
 |---|---|
-| `src/pipeline/snapshot.ts` | per-symbol rows for the whole eligible universe + neighbour lists; drop the 8 ranked lists; stop archiving the whole snapshot daily |
+| `src/pipeline/snapshot.ts` | per-symbol rows for the whole eligible universe + cluster ids (parallel arrays); drop the 8 ranked lists; stop archiving the whole snapshot daily |
 | `src/pipeline/score.ts` | expose per-symbol z-scores; keep `buildViews` for invariant assertions and tests |
 | `src/pipeline/series.ts` | add a correlation-grade encoding (2 chars/day) alongside the display one |
 | `tests/fixtures/` | **new** — full-precision closes for the ground-truth precision test |
@@ -179,20 +205,24 @@ This is strictly better than the client-side marker on every axis. It is more ac
 **The ground-truth test comes first, because the first draft's verification could not have caught the flaw that draft contained.** "Watchlist grouping over a subset still guarantees every within-group pair clears the threshold" computes ρ from shipped data, forms groups from those ρ values, then checks the groups against the same ρ values. That is internally consistent no matter how wrong the correlations are — it tests the clustering algorithm, which was never in doubt, and is structurally blind to degraded input. It would have gone green on wrong risk numbers.
 
 - **Ground truth (new, and the important one).** A committed fixture of full-precision adjusted closes for a dozen names. For every pair: the correlation computed from *shipped* data matches the pipeline's full-precision correlation within **0.005**, and produces the **same groups** at each threshold. This fails at 1 char/day, passes at 2, and runs offline. It is also what keeps the encoding honest later — anyone shaving bytes off the series to hit a size budget trips it, which is exactly when they should be stopped.
-- **Unit** — browser-side ranking reproduces the pipeline's ordering for all eight views; z-scores are stable under filtering; `web/lib/quant.js` passes the existing clustering suite unchanged; precomputed neighbour lists match a full-precision recomputation.
-- **Size budget, asserted in tests** — `snapshot.json` under **150 KB gzipped**; a single per-symbol series file under **2 KB**; and the home screen issues **no series request at all** until a chart is opened or a name is starred.
+- **Unit** — browser-side ranking reproduces the pipeline's ordering for all eight views; z-scores are stable under filtering; `web/lib/quant.js` passes the existing clustering suite unchanged; precomputed cluster ids match a full-precision recomputation, and every pair sharing an id clears that threshold.
+- **Size budget, asserted in tests** — set from measurement plus a stated margin, so a failure means *something regressed* rather than *the estimate was optimistic*:
+  - `snapshot.json` under **140 KB gzipped** — measured base 114 KB plus 3.7 KB of cluster ids, ≈ 18% headroom.
+  - a single per-symbol series file under **2 KB**.
+  - the home screen issues **no series request at all** until a chart is opened or a name is starred.
+  - **request count**, which is what the whole payload argument now rests on and nothing else protects: opening a watchlist of *n* names issues **at most *n*** series requests, and re-opening it issues **none**. Without this, a future change could re-fetch per render, or fetch the entire selection when one name was added, and every file-size assertion would still pass.
 - **UI** (`npm run verify:ui`, Chromium at 390×844) — filtering narrows the list without renumbering ranks; search works; incremental scroll loads more; starring survives a reload; the watchlist groups the selected names correctly; the ticker chart still renders; nothing loads from a third-party host.
 - **Performance** — time from load to first interactive row, and scroll smoothness with all 2,320 matching. Report both.
 
 ## Order
 
 1. Correlation-grade encoding + **the ground-truth test** — first, so everything downstream is built on verified numbers
-2. Pipeline: per-symbol rows, z-scores, neighbour lists, per-symbol series files
+2. Pipeline: per-symbol rows, z-scores, cluster ids, per-symbol series files
 3. `web/lib/quant.js` + retarget tests (`checkJs` confirmed)
 4. Home: ranked list, filters, incremental render
 5. Selection + `localStorage` + per-symbol fetching
 6. Watchlist screen
-7. Ticker watchlist button + "same trade" marking from the neighbour lists
+7. Ticker watchlist button + "same trade" marking from the cluster ids
 8. Full verification, then PR
 
 **Not doing:** portfolio optimization, position sizing, or any suggestion about what to buy. The tool ranks, filters, and shows concentration. The decision stays with the user.
