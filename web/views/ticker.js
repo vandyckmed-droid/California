@@ -12,93 +12,90 @@ function tvSymbol(meta, symbol) {
   return `${ex}:${symbol}`;
 }
 
+const SERIES_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** Mirror of the pipeline's encoder: one character per day, 64 levels. */
+function decodeSeries(series) {
+  if (!series || !series.points) return [];
+  const span = series.hi - series.lo;
+  const out = [];
+  for (const ch of series.points) {
+    out.push(series.lo + (span * SERIES_ALPHABET.indexOf(ch)) / (SERIES_ALPHABET.length - 1));
+  }
+  return out;
+}
+
 /**
- * Mounts TradingView's free Advanced Real-Time Chart.
+ * Draws the price line for the charted span, with each momentum horizon marked
+ * beneath it.
  *
- * Chart features are deliberately left on — drawing tools and the side
- * toolbar, indicators, the full timeframe row, date ranges, symbol search and
- * volume. The only things switched off are the widget's account-backed
- * save/load hooks, which need a TradingView login this project does not have,
- * and on a narrow phone the auxiliary side panels (details, watchlist,
- * calendar), which would otherwise leave almost no room for the chart itself.
- *
- * The widget draws TradingView's own data and is display-only: no number in
- * this app is derived from it. Every figure shown comes from the FMP snapshot.
+ * Done as inline SVG from data already in the snapshot rather than by embedding
+ * a charting library: one tap used to pull down a third-party charting app an
+ * order of magnitude larger than this entire product. This renders instantly,
+ * works offline, and — because the windows are drawn from the same anchors the
+ * ranking uses — shows exactly which stretch of price produced each number.
  */
-function mountChart(container, meta, symbol) {
-  const wide = window.matchMedia('(min-width: 700px)').matches;
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+function priceChart(sym, snapshot, activeHorizon) {
+  const closes = decodeSeries(sym.series);
+  if (closes.length < 2) return '<p class="chart-fallback">No price series for this name.</p>';
 
-  // TradingView's loader looks for its own container structure and replaces the
-  // __widget div with the chart iframe, so the markup below matches their
-  // documented embed exactly.
-  const wrap = document.createElement('div');
-  wrap.className = 'tradingview-widget-container';
-  wrap.style.cssText = 'height:100%;width:100%';
+  const dates = snapshot.meta.chartDates ?? [];
+  const horizons = snapshot.meta.params.horizons;
+  const last = closes.length - 1;
 
-  const slot = document.createElement('div');
-  slot.className = 'tradingview-widget-container__widget';
-  slot.style.cssText = 'height:calc(100% - 20px);width:100%';
-  wrap.append(slot);
+  // The SVG stretches to the container, so it carries only geometry. Every
+  // label lives in HTML beside it: text inside a non-uniformly scaled viewBox
+  // comes out squashed and far too small to read on a phone.
+  const W = 1000;
+  const H = 200;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const c of closes) {
+    if (c < lo) lo = c;
+    if (c > hi) hi = c;
+  }
+  const span = hi - lo || 1;
+  const x = (i) => (i / last) * W;
+  const y = (v) => H - ((v - lo) / span) * (H - 4) - 2;
 
-  const credit = document.createElement('div');
-  credit.className = 'tradingview-widget-copyright';
-  credit.innerHTML =
-    `<a href="https://www.tradingview.com/symbols/${tvSymbol(meta, symbol).replace(':', '-')}/" ` +
-    `rel="noopener nofollow" target="_blank"><span>${symbol} chart by TradingView</span></a>`;
-  wrap.append(credit);
+  const line = closes.map((c, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(c).toFixed(1)}`).join('');
+  const area = `${line}L${W},${H}L0,${H}Z`;
 
-  const script = document.createElement('script');
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.async = true;
-  script.type = 'text/javascript';
-  script.textContent = JSON.stringify({
-    autosize: true,
-    symbol: tvSymbol(meta, symbol),
-    interval: 'D',
-    timezone: 'America/New_York',
-    theme: dark ? 'dark' : 'light',
-    style: '1',
-    locale: 'en',
-    withdateranges: true,
-    range: '12M',
-    allow_symbol_change: true,
-    hide_side_toolbar: false,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    hide_volume: false,
-    save_image: true,
-    details: wide,
-    hotlist: false,
-    calendar: false,
-    support_host: 'https://www.tradingview.com',
-  });
-  wrap.append(script);
-  container.append(wrap);
+  // The skipped month: every horizon deliberately stops short of it.
+  const skip = horizons.h12_1.skip;
+  const skipX = x(last - skip);
 
-  // If the widget host is unreachable the container stays empty; say so rather
-  // than leaving a blank rectangle.
-  //
-  // The message is appended beside the widget rather than replacing it: on a
-  // cold cache over a slow connection six seconds is a plausible load time, and
-  // replacing the subtree would delete the loader script along with it, killing
-  // a working load and then mislabelling it as blocked. If the iframe does turn
-  // up later the message removes itself.
-  setTimeout(() => {
-    if (container.querySelector('iframe')) return;
-    const p = document.createElement('p');
-    p.className = 'chart-fallback';
-    p.textContent =
-      'The TradingView chart is taking a while — it may be blocked or offline. The figures below are unaffected.';
-    container.append(p);
-    const observer = new MutationObserver(() => {
-      if (container.querySelector('iframe')) {
-        p.remove();
-        observer.disconnect();
-      }
-    });
-    observer.observe(container, { childList: true, subtree: true });
-  }, 6000);
+  const pct = (i) => ((i / last) * 100).toFixed(2);
+  const bars = ['h12_1', 'h9_1', 'h6_1'].map((key) => {
+    const h = horizons[key];
+    const left = pct(last - h.lookback);
+    const width = (((h.lookback - h.skip) / last) * 100).toFixed(2);
+    const stat = sym.horizons[key];
+    const cls = `${stat.momentum >= 0 ? 'pos' : 'neg'}${key === activeHorizon ? ' on' : ''}`;
+    return `<div class="hz-row">
+      <div class="hz-bar ${cls}" style="left:${left}%;width:${width}%"></div>
+      <span class="hz-label ${cls}" style="left:${left}%">${h.label} ${fmtPct(stat.momentum)}</span>
+    </div>`;
+  }).join('');
+
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+    aria-label="${sym.name} price from ${dates[0] ?? ''} to ${dates[dates.length - 1] ?? ''}">
+    <rect class="skip" x="${skipX.toFixed(1)}" y="0" width="${(W - skipX).toFixed(1)}" height="${H}" />
+    <path class="area" d="${area}" />
+    <path class="line" d="${line}" />
+    <line class="skip-edge" x1="${skipX.toFixed(1)}" y1="0" x2="${skipX.toFixed(1)}" y2="${H}" />
+  </svg>
+  <div class="chart-range"><span>low ${lo.toFixed(2)}</span><span>high ${hi.toFixed(2)}</span></div>
+  <div class="hz-bars">${bars}</div>
+  <div class="chart-axis">
+    <span>${dates[0] ?? ''}</span>
+    <span class="skip-note">shaded ${skip} sessions excluded</span>
+    <span>${dates[dates.length - 1] ?? snapshot.meta.asOf}</span>
+  </div>`;
+}
+
+function fmtPct(v) {
+  return `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`;
 }
 
 function statsTable(sym) {
@@ -175,8 +172,8 @@ export function renderTicker(app, snapshot, symbol) {
 
   const chart = document.createElement('div');
   chart.className = 'chart-wrap';
+  chart.innerHTML = priceChart(sym, snapshot, state.score === 'blend' ? 'h12_1' : state.score);
   app.append(chart);
-  mountChart(chart, sym, symbol);
 
   app.insertAdjacentHTML('beforeend', statsTable(sym));
 
@@ -215,7 +212,8 @@ export function renderTicker(app, snapshot, symbol) {
 
   const foot = document.createElement('p');
   foot.className = 'foot';
-  foot.innerHTML = `Chart by TradingView, display only — it feeds no calculation here.
-    All figures above are computed from Financial Modeling Prep dividend-adjusted closes as of ${snapshot.meta.asOf}.`;
+  foot.innerHTML = `Dividend-adjusted closes from Financial Modeling Prep, as of ${snapshot.meta.asOf}.
+    <br><a class="tv-link" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(sym, symbol))}"
+      target="_blank" rel="noopener noreferrer">Open ${symbol} in TradingView &#8599;</a>`;
   app.append(foot);
 }

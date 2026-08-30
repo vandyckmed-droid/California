@@ -166,13 +166,28 @@ comparison false and disable rate limiting altogether.
 
 ## The per-ticker screen
 
-Tapping any name opens `#/SYMBOL`, which carries TradingView's free Advanced Real-Time Chart with
-its features left on — drawing tools, indicators, timeframes, date ranges, symbol search, volume.
-Only the account-backed save/load hooks are off (there is no TradingView login here), along with the
-auxiliary side panels on narrow phones, where they would crowd out the chart itself.
+Tapping any name opens `#/SYMBOL`: a price chart over the charted span with all
+three momentum windows marked beneath it, the per-horizon statistics, the names
+it moves with, and its rank across all eight views.
 
-**The chart is display-only and feeds no calculation.** Every figure in this app — momentum,
-volatility, normalization, ranking, correlation — comes from FMP.
+The chart is **drawn inline as SVG from data in the snapshot** — no charting
+library, no iframe, no third-party request. An embedded TradingView widget was
+tried first and removed: those 75 lines pulled in a 14 KB loader that opened an
+iframe to a full charting application (78 KB of HTML plus a dozen JS bundles and
+a live data socket), which is an order of magnitude larger than this entire
+product, on every tap.
+
+Shipping the prices instead costs **+83 KB** for the whole displayed universe.
+Each series is normalized to its own range and quantized to one character per
+day (`src/pipeline/series.ts`); 64 levels sounds coarse, but because the
+normalization is per series the error is always 1/63 of that name's own visible
+range — about two pixels on a phone chart, whether the stock moved 5% or 2500%.
+
+Because the windows are drawn from the same anchors the ranking uses, the chart
+shows exactly which stretch of price produced each momentum figure, with the
+skipped final 21 sessions shaded. The horizon matching the current view is
+highlighted. A plain text link out to TradingView remains for when the full
+charting tools are wanted; it costs one anchor tag.
 
 ## Layout
 
@@ -194,12 +209,14 @@ web/                      static phone page (no framework)
 
 `npm test` covers the exclusion rules against real listings, the momentum and volatility math
 against closed-form answers, the 17.5% floor, winsorized z-scores, calendar alignment across a halt,
-and clustering invariants including permutation-invariance.
+and clustering invariants including permutation-invariance, plus the price-series
+encoder's round-trip accuracy.
 
 `npm run verify:ui` drives the built page in Chromium at a 390×844 phone viewport and asserts that
 each of the 24 view/threshold combinations renders all 100 names exactly once in ascending rank,
-that tap targets stay ≥ 44px, that nothing scrolls sideways, that the per-ticker chart mounts with
-the right exchange-prefixed symbol and its features enabled, and that the back button restores the
+that tap targets stay ≥ 44px, that nothing scrolls sideways, that the per-ticker chart draws the full
+series with all three horizon windows marked and the viewed one highlighted, that its labels stay
+legible, that the page loads nothing from a third-party host, and that the back button restores the
 chosen view. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).
 
 The pipeline additionally asserts its own invariants on every run: ranks are exactly 1..100, each

@@ -19,6 +19,7 @@ import {
 import type { Group } from './cluster.ts';
 import type { StockMetrics } from './momentum.ts';
 import type { ViewResult } from './score.ts';
+import { encodeSeries, type EncodedSeries } from './series.ts';
 import type { UniverseMember } from './universe.ts';
 
 const r = (x: number, dp: number): number => {
@@ -39,6 +40,10 @@ export interface SnapshotInput {
   anchors: Record<HorizonKey, { start: string; end: string }>;
   members: Map<string, UniverseMember>;
   metrics: readonly StockMetrics[];
+  /** Closes over the charted span, keyed by symbol, oldest first. */
+  chartSeries: Map<string, number[]>;
+  /** Master-calendar dates for that span, shared by every series. */
+  chartDates: string[];
   views: Map<ViewId, ViewResult>;
   groupsByView: Map<ViewId, Map<number, Group[]>>;
   ungroupedByView: Map<ViewId, string[]>;
@@ -76,6 +81,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
         floored: h.realizedVol < VOL_FLOOR_ANNUALIZED,
       };
     }
+    const series = input.chartSeries.get(symbol);
     symbols[symbol] = {
       name: member.name,
       sector: member.sector,
@@ -85,6 +91,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
       marketCap: Math.round(member.marketCap),
       dollarVolume: Math.round(m.dollarVolume),
       horizons,
+      ...(series ? { series: encodeSeries(series) satisfies EncodedSeries } : {}),
     };
   }
 
@@ -125,6 +132,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
 
   const payload = {
     asOf: input.asOf,
+    chartDates: input.chartDates,
     calendarLength: input.calendarLength,
     anchors: input.anchors,
     params: {
@@ -166,6 +174,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
       generatedAt: new Date().toISOString(),
       dataHash,
       asOf: payload.asOf,
+      chartDates: payload.chartDates,
       calendarLength: payload.calendarLength,
       anchors: payload.anchors,
       params: payload.params,
