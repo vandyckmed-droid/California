@@ -1,9 +1,11 @@
 name: Refresh momentum screen
 
 on:
-  # Weekdays at 21:30 UTC — after the U.S. close, so the latest session is final.
+  # Weekdays at 23:00 UTC. The U.S. close is 20:00 UTC in summer and 21:00 UTC
+  # in winter, so this clears it by three hours year-round and gives FMP time
+  # to finalize the session's bars before the screen reads them.
   schedule:
-    - cron: '30 21 * * 1-5'
+    - cron: '0 23 * * 1-5'
   workflow_dispatch:
   push:
     branches: [main]
