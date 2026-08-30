@@ -9,6 +9,10 @@
   --pos: #14663f;
   --neg: #9a2c2c;
   --chip: #edece8;
+  --border-strong: #c9c8c2;
+  --accent-strong: #14663f;
+  --on-accent: #ffffff;
+  --sel-bg: #f2f7f4;
   --tap: 44px;
 }
 @media (prefers-color-scheme: dark) {
@@ -23,6 +27,10 @@
     --pos: #5fce9b;
     --neg: #f08a8a;
     --chip: #262623;
+    --border-strong: #4a4a46;
+    --accent-strong: #5fce9b;
+    --on-accent: #10221a;
+    --sel-bg: #17211c;
   }
 }
 
@@ -38,20 +46,57 @@ body {
 .loading { padding: 32px 16px; color: var(--muted); }
 
 /* ---------- header ---------- */
-.head {
+.head { padding: 10px 14px 6px; }
+/* Only the view selector is pinned; the filters below it scroll away. */
+.viewbar {
   position: sticky; top: 0; z-index: 20;
-  background: var(--bg);
+  background: var(--bg); padding: 4px 12px 6px;
   border-bottom: 1px solid var(--border);
-  padding: 10px 14px 8px;
 }
+.filters { padding: 8px 12px 4px; display: flex; flex-direction: column; gap: 6px; }
+.filters .row2 { gap: 8px; }
 .head h1 {
   margin: 0; font-size: 16px; font-weight: 620; letter-spacing: -0.01em;
   display: flex; align-items: baseline; gap: 8px;
 }
 .head h1 .as-of { font-size: 12px; font-weight: 450; color: var(--muted); }
-.sub { margin: 2px 0 8px; font-size: 11.5px; color: var(--faint); }
+.sub { margin: 2px 0 0; font-size: 11.5px; color: var(--faint); }
+.sub b { color: var(--text); font-weight: 620; }
 
-.controls { display: flex; flex-direction: column; gap: 6px; }
+/* Sector chips: multi-select, empty means all. */
+.chips {
+  display: flex; gap: 6px; overflow-x: auto; padding: 1px 0 2px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.chips::-webkit-scrollbar { display: none; }
+/* Full tap height: these sit in a horizontally scrolling row, where the
+   gesture is already ambiguous between tap and pan, so a short target reads
+   as smaller than its box. */
+.chip {
+  flex: 0 0 auto; min-height: var(--tap); padding: 0 13px; border-radius: 22px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 560; }
+
+.search {
+  width: 100%; min-height: var(--tap); padding: 0 12px; font: inherit; font-size: 14px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--text); -webkit-appearance: none;
+}
+.search::placeholder { color: var(--faint); }
+
+/* One flat list, not group cards: the home screen is a ranked list now. */
+.rows {
+  margin: 8px 12px 0; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+}
+.more {
+  margin: 10px 12px 0; padding: 12px; text-align: center;
+  font-size: 11.5px; color: var(--faint);
+}
+
+
 .seg {
   display: flex; background: var(--chip); border-radius: 9px; padding: 2px; gap: 2px;
 }
@@ -82,12 +127,63 @@ body {
 .card-head .rho { font-variant-numeric: tabular-nums; }
 
 .stock {
-  display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px;
-  min-height: var(--tap); padding: 6px 12px;
+  display: grid; grid-template-columns: 1fr 52px; align-items: stretch;
   border-top: 1px solid var(--border);
-  color: inherit; text-decoration: none;
+  border-left: 2px solid transparent;
 }
-.stock:first-of-type { border-top: 0; }
+/* Selected rows are outlined, so a glance down the list shows what you hold. */
+.stock.on { border-left-color: var(--accent-strong); background: var(--sel-bg); }
+.stock .open {
+  display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px;
+  min-height: var(--tap); padding: 6px 0 6px 12px;
+  color: inherit; text-decoration: none; min-width: 0;
+}
+.stock .check {
+  display: flex; align-items: center; justify-content: center;
+  border: 0; background: none; cursor: pointer; padding: 0;
+}
+.stock .check::before {
+  content: ''; width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px solid var(--border-strong); transition: background .12s, border-color .12s;
+}
+.stock .check[aria-pressed="true"]::before {
+  background: var(--accent-strong); border-color: var(--accent-strong);
+  box-shadow: inset 0 0 0 2px var(--surface);
+}
+.stock .check:focus-visible::before { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+/* Marks a name that moves with something already on the list. */
+.dot {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent-strong); margin-left: 6px; vertical-align: middle;
+}
+.floor-mark { display: block; font-size: 9.5px; color: var(--faint); font-weight: 400; letter-spacing: .03em; }
+
+.showrow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.showrow select {
+  flex: 1; min-height: var(--tap); padding: 0 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text);
+}
+
+/* Only present once something is selected. */
+.actionbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
+  background: var(--surface); border-top: 1px solid var(--border);
+}
+.actionbar .count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.actionbar .linkish {
+  border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px;
+  min-height: var(--tap); padding: 0 6px; cursor: pointer;
+}
+.actionbar .primary {
+  margin-left: auto; min-height: var(--tap); padding: 0 16px; border: 0; border-radius: 10px;
+  background: var(--accent-strong); color: var(--on-accent);
+  font: inherit; font-size: 13.5px; font-weight: 620; cursor: pointer;
+}
+body.has-bar .foot { padding-bottom: 76px; }
+.rows .stock:first-child { border-top: 0; }
 .stock:active { background: var(--chip); }
 .rank { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; }
 .ident { min-width: 0; }
@@ -168,3 +264,35 @@ td .floored { color: var(--faint); font-size: 10.5px; margin-left: 4px; }
 
 .foot { padding: 14px 16px 0; font-size: 11px; color: var(--faint); line-height: 1.55; }
 .foot code { font-size: 10.5px; word-break: break-all; }
+
+/* ---------- watchlist ---------- */
+.wl { padding: 0 0 24px; }
+.wl-toggle { display: flex; gap: 2px; margin: 4px 12px 0; background: var(--chip); border-radius: 9px; padding: 2px; }
+.wl-toggle button {
+  flex: 1; min-height: var(--tap); border: 0; border-radius: 7px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer;
+}
+.wl-toggle button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.10); }
+/* Inside a panel the toggle sits flush to the panel's own edges, not the page's. */
+.wl-toggle.small { margin: 0 10px 6px; }
+.wl-toggle.small button { font-size: 12px; }
+.wl-note { margin: 8px 14px 2px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.wl-note b { color: var(--text); font-variant-numeric: tabular-nums; }
+.wl-empty { margin: 0; padding: 9px 12px; font-size: 11.5px; line-height: 1.5; color: var(--faint); }
+.wl-group { padding: 8px 12px; border-top: 1px solid var(--border); }
+.wl-group:first-of-type { border-top: 0; }
+.wl-group-head { font-size: 11px; color: var(--muted); }
+.wl-group-names { font-size: 13px; font-weight: 560; margin-top: 2px; line-height: 1.45; }
+.scroll-x { overflow-x: auto; }
+.rows.flat { margin: 0; border: 0; border-radius: 0; }
+.watch-toggle {
+  margin-top: 10px; min-height: var(--tap); padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer;
+}
+.watch-toggle[aria-pressed="true"] { border-color: var(--pos); color: var(--pos); }
+.wl-clear {
+  display: block; margin: 14px auto 0; min-height: var(--tap); padding: 0 18px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  color: var(--neg); font: inherit; font-size: 13px; cursor: pointer;
+}

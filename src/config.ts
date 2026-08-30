@@ -17,7 +17,14 @@ export type Exchange = (typeof EXCHANGES)[number];
 // Tradability gates
 // ---------------------------------------------------------------------------
 
-export const MIN_MARKET_CAP = 1_000_000_000;
+/**
+ * Market cap is a weak proxy for tradability and the liquidity gate below is
+ * the one doing the work: measured, moving this floor from $1B to $200M adds
+ * ~380 names and every one of them still clears $5M/day. Set low deliberately
+ * so the universe is "everything you could actually trade" rather than
+ * "everything large".
+ */
+export const MIN_MARKET_CAP = 200_000_000;
 export const MIN_PRICE = 5;
 /** Median daily dollar volume over the trailing correlation window. */
 export const MIN_MEDIAN_DOLLAR_VOLUME = 5_000_000;
@@ -57,6 +64,19 @@ export const VOL_FLOOR_ANNUALIZED = 0.175;
 export const WINSOR_LOWER_PCT = 0.01;
 export const WINSOR_UPPER_PCT = 0.99;
 export const BLEND_WEIGHT = 1 / 3;
+/**
+ * Decimal places z-scores are rounded to.
+ *
+ * The rounding happens inside the normalization, not on the way out, so the
+ * pipeline ranks from exactly the numbers the browser receives. Rounding only
+ * at serialization time would let the two disagree: measured on real data,
+ * even five decimal places reorders one of the eight views relative to full
+ * precision, because names separated by less than half a unit in the last
+ * place fall back on the symbol tie-break. Four decimals is far below any
+ * meaningful difference in a unit-variance score, and being the single source
+ * of truth is worth more than the discarded digits.
+ */
+export const Z_DECIMALS = 4;
 
 // ---------------------------------------------------------------------------
 // Correlation grouping

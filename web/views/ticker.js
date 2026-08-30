@@ -1,4 +1,9 @@
-import { HORIZONS, SCORE_LABELS, navigate, num, pct, state, syncHash, viewKey } from '../app.js';
+import {
+  currentRanks, goBack, loadSeries, marketCapLabel, navigate, num, pct, state,
+  toggleWatch, watchlist,
+} from '../app.js';
+import { scoresFor, ranksFor } from '../lib/model.js';
+import { HORIZONS, SCORE_LABELS } from '../lib/model.js';
 import { escapeHtml } from './list.js';
 
 /** Compact market cap: trillions once past 1000B, so it never reads "$1053.6B". */
@@ -14,13 +19,26 @@ function tvSymbol(meta, symbol) {
 
 const SERIES_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
-/** Mirror of the pipeline's encoder: one character per day, 64 levels. */
-function decodeSeries(series) {
+/**
+ * Decodes the **display** series, and is named so.
+ *
+ * Kept here with the chart rather than beside `pearson` in the shared quant
+ * module: this data is lossy by design and must never reach a correlation.
+ * Having the decoder sit next to the correlation function is what made feeding
+ * one into the other feel natural, and produced numbers that were plausible,
+ * self-consistent and wrong.
+ */
+function decodeDisplaySeries(series) {
   if (!series || !series.points) return [];
   const span = series.hi - series.lo;
+  const width = series.w ?? 1;
+  const base = SERIES_ALPHABET.length;
+  const top = base ** width - 1;
   const out = [];
-  for (const ch of series.points) {
-    out.push(series.lo + (span * SERIES_ALPHABET.indexOf(ch)) / (SERIES_ALPHABET.length - 1));
+  for (let i = 0; i + width <= series.points.length; i += width) {
+    let level = 0;
+    for (let c = 0; c < width; c++) level = level * base + SERIES_ALPHABET.indexOf(series.points[i + c]);
+    out.push(series.lo + (span * level) / top);
   }
   return out;
 }
@@ -36,7 +54,7 @@ function decodeSeries(series) {
  * ranking uses — shows exactly which stretch of price produced each number.
  */
 function priceChart(sym, snapshot, activeHorizon) {
-  const closes = decodeSeries(sym.series);
+  const closes = decodeDisplaySeries(sym.series);
   if (closes.length < 2) return '<p class="chart-fallback">No price series for this name.</p>';
 
   const dates = snapshot.meta.chartDates ?? [];
@@ -116,22 +134,61 @@ function statsTable(sym) {
   </div>`;
 }
 
-function rankGrid(snapshot, symbol) {
-  // Same order as the controls: horizon major, mode minor.
-  const order = ['h12_1', 'h9_1', 'h6_1', 'blend'].flatMap((k) => [`${k}|raw`, `${k}|voladj`]);
-  const cells = order.filter((id) => snapshot.views[id]).map((id) => {
-    const view = snapshot.views[id];
-    const hit = view.ranked.find((e) => e.symbol === symbol);
-    const label = `${SCORE_LABELS[view.scoreKey]}${view.mode === 'voladj' ? ' vol-adj' : ''}`;
-    return `<div class="rank-cell${hit ? '' : ' none'}">
-      <span>${label}</span><b>${hit ? `#${hit.rank}` : 'not top 100'}</b>
-    </div>`;
-  }).join('');
+function rankGrid(snapshot, index) {
+  const symbols = snapshot.columns.symbol;
+  const cells = ['h12_1', 'h9_1', 'h6_1', 'blend'].flatMap((score) =>
+    ['raw', 'voladj'].map((mode) => {
+      const rank = ranksFor(scoresFor(snapshot, score, mode), symbols)[index];
+      const label = `${SCORE_LABELS[score]}${mode === 'voladj' ? ' vol-adj' : ''}`;
+      return `<div class="rank-cell"><span>${label}</span><b>#${rank}</b></div>`;
+    }),
+  ).join('');
   return `<div class="panel"><h3>Rank in each view</h3><div class="rank-grid">${cells}</div></div>`;
 }
 
+/** Everything the detail screen needs about one name, read from the columns. */
+function rowData(snapshot, symbol) {
+  const c = snapshot.columns;
+  const i = c.symbol.indexOf(symbol);
+  if (i < 0) return null;
+  const horizons = {};
+  HORIZONS.forEach((key, h) => {
+    const momentum = c.m[h][i];
+    const realizedVol = c.rv[h][i];
+    const effectiveVol = Math.max(realizedVol, snapshot.meta.params.volFloorAnnualized);
+    horizons[key] = {
+      momentum, realizedVol, effectiveVol,
+      volAdjusted: momentum / effectiveVol,
+      floored: realizedVol < snapshot.meta.params.volFloorAnnualized,
+    };
+  });
+  return {
+    i, symbol,
+    name: c.name[i],
+    sector: c.sectors[c.sector[i]] ?? '',
+    exchange: c.exchanges[c.exchange[i]] ?? '',
+    price: c.price[i],
+    marketCap: c.marketCapM[i] * 1e6,
+    horizons,
+  };
+}
+
+/** Names sharing this one's universe cluster, from ids already in the snapshot. */
+function clusterPeers(snapshot, index) {
+  const t = snapshot.clusters.thresholds.findIndex((v) => v.toFixed(2) === state.threshold);
+  if (t < 0) return [];
+  const ids = snapshot.clusters.ids[t];
+  const id = ids[index];
+  if (id === undefined || id < 0) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    if (i !== index && ids[i] === id) out.push(i);
+  }
+  return out;
+}
+
 export function renderTicker(app, snapshot, symbol) {
-  const sym = snapshot.symbols[symbol];
+  const sym = rowData(snapshot, symbol);
   app.replaceChildren();
 
   const head = document.createElement('header');
@@ -139,12 +196,11 @@ export function renderTicker(app, snapshot, symbol) {
   const back = document.createElement('a');
   back.className = 'back';
   back.href = '#';
-  back.textContent = '‹ Back to groups';
-  back.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (history.length > 1) history.back();
-    else { syncHash(''); location.hash = `/?score=${state.score}&mode=${state.mode}&threshold=${state.threshold}`; }
-  });
+  back.textContent = '‹ Back to list';
+  // `history.length > 1` is true of any tab that has been anywhere else, so it
+  // said "pop" on a cold load straight onto this screen. The depth stamp knows
+  // whether *this app* put an entry behind us.
+  back.addEventListener('click', (e) => { e.preventDefault(); goBack(); });
   head.append(back);
   app.append(head);
 
@@ -156,46 +212,65 @@ export function renderTicker(app, snapshot, symbol) {
     return;
   }
 
-  const view = snapshot.views[viewKey()];
-  const entry = view.ranked.find((e) => e.symbol === symbol);
-
+  const ranks = currentRanks();
   const title = document.createElement('div');
   title.className = 'detail-head';
   title.innerHTML = `
-    <h2>${symbol}${entry ? ` <span class="as-of">#${entry.rank}</span>` : ''}</h2>
+    <h2>${escapeHtml(symbol)} <span class="as-of">#${ranks[sym.i]}</span></h2>
     <div class="meta">${escapeHtml(sym.name)}</div>
-    <div class="meta">${escapeHtml(sym.sector || '—')} · ${escapeHtml(sym.exchange)} · ${marketCap(sym.marketCap)} · $${sym.price.toFixed(2)}</div>`;
+    <div class="meta">${escapeHtml(sym.sector || '—')} · ${escapeHtml(sym.exchange)} · ${marketCapLabel(sym.marketCap)} · $${sym.price.toFixed(2)}</div>`;
   app.append(title);
 
+  // Same one-tap model as the list: checking is saving, and the button states
+  // what it will do rather than what the name currently is.
+  const watch = document.createElement('button');
+  watch.type = 'button';
+  watch.className = 'watch-toggle';
+  const paintWatch = () => {
+    const on = watchlist.has(symbol);
+    watch.setAttribute('aria-pressed', String(on));
+    watch.textContent = on ? '✓ On your watchlist' : '+ Add to watchlist';
+  };
+  paintWatch();
+  watch.addEventListener('click', () => { toggleWatch(symbol); paintWatch(); });
+  title.append(watch);
+
+  // The chart needs this one name's prices — ~640 bytes, fetched on arrival.
   const chart = document.createElement('div');
   chart.className = 'chart-wrap';
-  chart.innerHTML = priceChart(sym, snapshot, state.score === 'blend' ? 'h12_1' : state.score);
+  chart.innerHTML = '<p class="chart-fallback">Loading chart…</p>';
   app.append(chart);
+  const painted = loadSeries(symbol)
+    .then((file) => {
+      chart.innerHTML = priceChart(
+        { ...sym, series: file.display },
+        snapshot,
+        state.score === 'blend' ? 'h12_1' : state.score,
+      );
+    })
+    .catch(() => {
+      chart.innerHTML =
+        '<p class="chart-fallback">Could not load this name\'s price history. The figures below are unaffected.</p>';
+    });
 
   app.insertAdjacentHTML('beforeend', statsTable(sym));
 
-  // Peers in this name's correlation group, at the active threshold.
-  const group = (view.groups[state.threshold] ?? []).find((g) => g.members.includes(symbol));
-  if (group && group.members.length > 1) {
-    const self = group.members.indexOf(symbol);
-    const rows = group.members
-      .filter((m) => m !== symbol)
-      .map((m) => {
-        const peer = view.ranked.find((e) => e.symbol === m);
-        const rho = group.corr ? group.corr[self][group.members.indexOf(m)] : null;
-        return `<tr data-symbol="${m}">
-          <th>${m}</th>
-          <td style="text-align:left;color:var(--muted);font-weight:400">${escapeHtml((snapshot.symbols[m]?.name ?? '').slice(0, 28))}</td>
-          <td>${peer ? `#${peer.rank}` : '—'}</td>
-          <td>${rho == null ? '—' : rho.toFixed(2)}</td>
-        </tr>`;
-      })
-      .join('');
+  const peers = clusterPeers(snapshot, sym.i);
+  if (peers.length > 0) {
+    const c = snapshot.columns;
+    const rows = peers
+      .sort((a, b) => ranks[a] - ranks[b])
+      .slice(0, 12)
+      .map((i) => `<tr data-symbol="${escapeHtml(c.symbol[i])}">
+        <th>${escapeHtml(c.symbol[i])}</th>
+        <td style="text-align:left;color:var(--muted);font-weight:400">${escapeHtml(String(c.name[i]).slice(0, 28))}</td>
+        <td>#${ranks[i]}</td>
+      </tr>`).join('');
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = `<h3>Moves with (<span class="lc">&rho;</span> &ge; ${state.threshold})</h3>
       <table class="stats">
-        <thead><tr><th>Symbol</th><th style="text-align:left">Name</th><th>Rank</th><th class="lc">&rho;</th></tr></thead>
+        <thead><tr><th>Symbol</th><th style="text-align:left">Name</th><th>Rank</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     panel.querySelectorAll('tr[data-symbol]').forEach((tr) => {
@@ -205,12 +280,16 @@ export function renderTicker(app, snapshot, symbol) {
     app.append(panel);
   }
 
-  app.insertAdjacentHTML('beforeend', rankGrid(snapshot, symbol));
+  app.insertAdjacentHTML('beforeend', rankGrid(snapshot, sym.i));
 
   const foot = document.createElement('p');
   foot.className = 'foot';
   foot.innerHTML = `Dividend-adjusted closes from Financial Modeling Prep, as of ${snapshot.meta.asOf}.
     <br><a class="tv-link" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(sym, symbol))}"
-      target="_blank" rel="noopener noreferrer">Open ${symbol} in TradingView &#8599;</a>`;
+      target="_blank" rel="noopener noreferrer">Open ${escapeHtml(symbol)} in TradingView &#8599;</a>`;
   app.append(foot);
+
+  // The chart replaces a one-line placeholder, so the page grows after this
+  // returns; scroll restoration has to wait for that.
+  return painted;
 }

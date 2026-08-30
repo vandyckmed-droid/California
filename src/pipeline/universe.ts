@@ -9,6 +9,7 @@ import type { ScreenerRow } from '../fmp/types.ts';
 export type ExclusionReason =
   | 'preferredSymbol'
   | 'namePattern'
+  | 'partnership'
   | 'shellCompany'
   | 'missingMetadata'
   | 'duplicateSymbol';
@@ -22,6 +23,7 @@ export interface UniverseMember {
   marketCap: number;
   price: number;
   avgVolume: number | null;
+  country: string;
 }
 
 export interface UniverseResult {
@@ -68,6 +70,22 @@ const NON_COMMON_NAME = new RegExp(
 );
 
 /**
+ * Publicly traded partnerships distribute K-1s rather than 1099s, which is
+ * real friction for a personal account regardless of how the units trade.
+ *
+ * Matched on the legal suffix, not on the word "Partners": a loose match would
+ * wrongly exclude 23 ordinary corporations in the current universe, among them
+ * Coca-Cola Europacific Partners, Construction Partners and Surgery Partners.
+ * Same shape of mistake as "Preferred Bank" — the giveaway is the entity type,
+ * not a word in the name.
+ */
+const PARTNERSHIP = /\bL\.?P\.?$|\bL\.?P\.?[,\s]|\bLimited Partnership\b/i;
+
+export function isPartnership(name: string): boolean {
+  return PARTNERSHIP.test(name ?? '');
+}
+
+/**
  * A plain ADR of common equity ("Arm Holdings plc American Depositary Shares")
  * is a normal listing and must not be caught by the depositary rule. Only
  * depositary receipts that also carry a preferred marker are excluded, and
@@ -93,6 +111,7 @@ export function classify(row: ScreenerRow): ExclusionReason | null {
   if (!row.symbol) return 'missingMetadata';
   if (isPreferredSymbol(row.symbol)) return 'preferredSymbol';
   if (hasNonCommonName(row.companyName ?? '')) return 'namePattern';
+  if (isPartnership(row.companyName ?? '')) return 'partnership';
   if (row.industry === 'Shell Companies') return 'shellCompany';
   if (row.marketCap == null || row.price == null || !row.exchangeShortName) return 'missingMetadata';
   return null;
@@ -107,6 +126,7 @@ export async function buildUniverse(client: FmpClient): Promise<UniverseResult> 
   const exclusions: Record<ExclusionReason, number> = {
     preferredSymbol: 0,
     namePattern: 0,
+    partnership: 0,
     shellCompany: 0,
     missingMetadata: 0,
     duplicateSymbol: 0,
@@ -143,6 +163,11 @@ export async function buildUniverse(client: FmpClient): Promise<UniverseResult> 
       marketCap: row.marketCap as number,
       price: row.price as number,
       avgVolume: row.avgVolume ?? null,
+      // Carried so a domicile filter is a UI change later rather than a
+      // pipeline re-run. Not filtered on: the field cannot identify the thing
+      // that would justify it — FMP puts PDD in Ireland and Trip.com in
+      // Singapore, so a "China" rule would drop Alibaba and keep PDD.
+      country: row.country ?? '',
     });
   }
 

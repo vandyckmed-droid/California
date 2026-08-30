@@ -4,49 +4,38 @@ import {
   CORR_WINDOW,
   HORIZONS,
   HORIZON_KEYS,
+  MIN_ACTUAL_BAR_COVERAGE,
   MIN_MARKET_CAP,
   MIN_MEDIAN_DOLLAR_VOLUME,
   MIN_PRICE,
-  MIN_ACTUAL_BAR_COVERAGE,
+  MODES,
   THRESHOLDS,
   TOP_N,
   VOL_FLOOR_ANNUALIZED,
   WINSOR_LOWER_PCT,
   WINSOR_UPPER_PCT,
   type HorizonKey,
-  type ViewId,
+  type Mode,
 } from '../config.ts';
-import type { Group } from './cluster.ts';
 import type { StockMetrics } from './momentum.ts';
-import type { ViewResult } from './score.ts';
-import { encodeSeries, type EncodedSeries } from './series.ts';
+import { crossSectionalNormalize } from './normalize.ts';
 import type { UniverseMember } from './universe.ts';
+import type { UniverseClusters } from './universeClusters.ts';
 
 const r = (x: number, dp: number): number => {
   const f = 10 ** dp;
   return Math.round(x * f) / f;
 };
 
-export interface SnapshotGroup {
-  members: string[];
-  minCorr: number;
-  bestRank: number;
-  corr?: number[][];
-}
-
 export interface SnapshotInput {
   asOf: string;
   calendarLength: number;
+  chartDates: string[];
   anchors: Record<HorizonKey, { start: string; end: string }>;
   members: Map<string, UniverseMember>;
+  /** Every eligible name, already sorted by symbol. */
   metrics: readonly StockMetrics[];
-  /** Closes over the charted span, keyed by symbol, oldest first. */
-  chartSeries: Map<string, number[]>;
-  /** Master-calendar dates for that span, shared by every series. */
-  chartDates: string[];
-  views: Map<ViewId, ViewResult>;
-  groupsByView: Map<ViewId, Map<number, Group[]>>;
-  ungroupedByView: Map<ViewId, string[]>;
+  clusters: UniverseClusters;
   screenedCount: number;
   afterStaticExclusions: number;
   exclusions: Record<string, number>;
@@ -54,81 +43,82 @@ export interface SnapshotInput {
 }
 
 /**
- * Assembles the snapshot with deliberate key ordering, then stamps a hash over
- * everything except `generatedAt`. Two runs against the same as-of date must
- * produce the same `dataHash`; that is the reproducibility check.
+ * Assembles the snapshot the ranked list reads.
+ *
+ * It carries the **whole eligible universe** but no prices: filtering has to
+ * precede ranking, so the browser needs every row, and prices are fetched per
+ * symbol only when a chart or a watchlist actually needs one.
+ *
+ * Ranking itself is not materialized here. Eight pre-computed Top-100 lists
+ * cannot support filter-then-rank, and would be a second source of truth for
+ * an ordering the browser can derive in under a millisecond. What the pipeline
+ * must supply is the part the browser *cannot* derive: winsorized
+ * cross-sectional z-scores, which depend on the full cross-section and must
+ * not shift when a filter changes.
  */
 export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
-  // Only names that actually surface in a view are carried into the snapshot.
-  // The eligible universe is an order of magnitude larger, and shipping all of
-  // it would make the phone download megabytes it never reads.
-  const referenced = new Set<string>();
-  for (const view of input.views.values()) for (const e of view.ranked) referenced.add(e.symbol);
+  const symbols = input.metrics.map((m) => m.symbol);
 
-  const symbols: Record<string, unknown> = {};
-  const bySymbol = new Map(input.metrics.map((m) => [m.symbol, m]));
-  for (const symbol of [...referenced].sort()) {
-    const m = bySymbol.get(symbol) as StockMetrics;
-    const member = input.members.get(symbol) as UniverseMember;
-    const horizons: Record<string, unknown> = {};
-    for (const key of HORIZON_KEYS) {
-      const h = m.horizons[key];
-      horizons[key] = {
-        momentum: r(h.momentum, 6),
-        realizedVol: r(h.realizedVol, 6),
-        effectiveVol: r(h.effectiveVol, 6),
-        volAdjusted: r(h.volAdjusted, 6),
-        floored: h.realizedVol < VOL_FLOOR_ANNUALIZED,
-      };
+  // Normalize each horizon over the whole eligible universe, per mode. These
+  // are what make the blend meaningful and what filtering must not disturb.
+  const z = {} as Record<Mode, Record<HorizonKey, number[]>>;
+  for (const mode of MODES) {
+    z[mode] = {} as Record<HorizonKey, number[]>;
+    for (const horizon of HORIZON_KEYS) {
+      z[mode][horizon] = crossSectionalNormalize(
+        input.metrics.map((m) =>
+          mode === 'raw' ? m.horizons[horizon].momentum : m.horizons[horizon].volAdjusted,
+        ),
+      );
     }
-    const series = input.chartSeries.get(symbol);
-    symbols[symbol] = {
-      name: member.name,
-      sector: member.sector,
-      industry: member.industry,
-      exchange: member.exchange,
-      price: r(m.latestClose, 2),
-      marketCap: Math.round(member.marketCap),
-      dollarVolume: Math.round(m.dollarVolume),
-      horizons,
-      ...(series ? { series: encodeSeries(series) satisfies EncodedSeries } : {}),
-    };
   }
 
-  const views: Record<string, unknown> = {};
-  for (const id of [...input.views.keys()].sort()) {
-    const view = input.views.get(id) as ViewResult;
-    const groupsByThreshold = input.groupsByView.get(id) ?? new Map<number, Group[]>();
-    const groups: Record<string, SnapshotGroup[]> = {};
-    for (const t of THRESHOLDS) {
-      const gs = groupsByThreshold.get(t) ?? [];
-      groups[t.toFixed(2)] = gs.map((g) => {
-        const row: SnapshotGroup = {
-          members: g.members.map((i) => (view.ranked[i] as { symbol: string }).symbol),
-          minCorr: r(g.minCorr, 4),
-          bestRank: g.bestRank + 1,
-        };
-        if (g.corr && g.members.length > 1) row.corr = g.corr.map((c) => c.map((x) => r(x, 3)));
-        return row;
-      });
-    }
-    views[id] = {
-      scoreKey: view.scoreKey,
-      mode: view.mode,
-      universeSize: view.universeSize,
-      ranked: view.ranked.map((e) => {
-        const row: Record<string, unknown> = { rank: e.rank, symbol: e.symbol, score: r(e.score, 6) };
-        if (e.components) {
-          const c: Record<string, number> = {};
-          for (const k of HORIZON_KEYS) c[k] = r(e.components[k], 6);
-          row.components = c;
-        }
-        return row;
-      }),
-      groups,
-      ungrouped: input.ungroupedByView.get(id) ?? [],
-    };
+  // Columnar, not one object per name. Repeating nine key names across 2,320
+  // rows costs ~140 KB of pure punctuation, and grouping like values together
+  // compresses far better than interleaving them: measured, this is 216 KB
+  // gzipped as row objects against 112 KB as columns, for identical data.
+  const sectors = [...new Set(input.metrics.map((m) => member(m).sector))].sort();
+  const exchanges = [...new Set(input.metrics.map((m) => member(m).exchange))].sort();
+  const countries = [...new Set(input.metrics.map((m) => member(m).country))].sort();
+  const sectorIndex = new Map(sectors.map((v, i) => [v, i]));
+  const exchangeIndex = new Map(exchanges.map((v, i) => [v, i]));
+  const countryIndex = new Map(countries.map((v, i) => [v, i]));
+
+  function member(m: StockMetrics): UniverseMember {
+    return input.members.get(m.symbol) as UniverseMember;
   }
+
+  const columns = {
+    symbol: input.metrics.map((m) => m.symbol),
+    name: input.metrics.map((m) => member(m).name),
+    sectors,
+    exchanges,
+    sector: input.metrics.map((m) => sectorIndex.get(member(m).sector) ?? 0),
+    exchange: input.metrics.map((m) => exchangeIndex.get(member(m).exchange) ?? 0),
+    /**
+     * Domicile, carried but not filtered on. It is here so a domicile filter
+     * is a UI change rather than a pipeline re-run — and deliberately not used
+     * as an exclusion rule, because the field cannot support one honestly:
+     * FMP places PDD in Ireland and Trip.com in Singapore, so a "China" rule
+     * would drop Alibaba and keep PDD.
+     */
+    countries,
+    country: input.metrics.map((m) => countryIndex.get(member(m).country) ?? 0),
+    price: input.metrics.map((m) => r(m.latestClose, 2)),
+    /** Millions, so a $1.2T cap is 1200000 rather than 1200000000000. */
+    marketCapM: input.metrics.map((m) => Math.round(member(m).marketCap / 1e6)),
+    /** Per horizon, in HORIZON_KEYS order: raw momentum and realized volatility. */
+    m: HORIZON_KEYS.map((h) => input.metrics.map((x) => r(x.horizons[h].momentum, 5))),
+    rv: HORIZON_KEYS.map((h) => input.metrics.map((x) => r(x.horizons[h].realizedVol, 4))),
+    /**
+     * Cross-sectional z-scores, already rounded by the normalization itself,
+     * so these are the exact values the pipeline ranked from. The browser
+     * cannot derive them: winsorized z-scores depend on the full cross-section
+     * and must not shift when a filter changes.
+     */
+    zr: HORIZON_KEYS.map((h) => (z.raw[h] as number[]).slice()),
+    zv: HORIZON_KEYS.map((h) => (z.voladj[h] as number[]).slice()),
+  };
 
   const payload = {
     asOf: input.asOf,
@@ -137,7 +127,10 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
     anchors: input.anchors,
     params: {
       horizons: Object.fromEntries(
-        HORIZON_KEYS.map((k) => [k, { lookback: HORIZONS[k].lookback, skip: HORIZONS[k].skip, label: HORIZONS[k].label }]),
+        HORIZON_KEYS.map((k) => [
+          k,
+          { lookback: HORIZONS[k].lookback, skip: HORIZONS[k].skip, label: HORIZONS[k].label },
+        ]),
       ),
       volFloorAnnualized: VOL_FLOOR_ANNUALIZED,
       winsorPct: [WINSOR_LOWER_PCT, WINSOR_UPPER_PCT],
@@ -154,19 +147,25 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
       screened: input.screenedCount,
       afterStaticExclusions: input.afterStaticExclusions,
       eligible: input.metrics.length,
-      displayed: referenced.size,
     },
     exclusions: input.exclusions,
     excludedSamples: input.excludedSamples,
-    views,
+    // Three parallel arrays in column order, NOT an object keyed by ticker:
+    // keying by symbol re-lists 2,320 ticker strings the rows already carry,
+    // which costs 19.3 KB gzipped against a few KB for the same information.
+    clusters: {
+      thresholds: [...THRESHOLDS],
+      ids: input.clusters.ids,
+      groupCounts: input.clusters.groupCounts,
+      largest: input.clusters.largest,
+    },
+    columns,
   };
 
-  // What the hash certifies: the rankings, the groupings, and the parameters
-  // and anchors that produced them. Descriptive per-symbol metadata sits
-  // outside it, because market cap comes from the screener and ticks during
-  // the session — folding it in would make two identical rankings hash
-  // differently. If that drift ever flips a name across the eligibility floor,
-  // the universe counts and the views themselves change, so the hash moves.
+  // Certifies the scores, cluster ids and the parameters behind them.
+  // Descriptive metadata from the live screener is in the columns too, so
+  // market-cap drift moves this — accepted, because the eligible set is what
+  // that drift would actually change.
   const dataHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
   return {
@@ -182,7 +181,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
       exclusions: payload.exclusions,
       excludedSamples: payload.excludedSamples,
     },
-    symbols,
-    views: payload.views,
+    clusters: payload.clusters,
+    columns: payload.columns,
   };
 }

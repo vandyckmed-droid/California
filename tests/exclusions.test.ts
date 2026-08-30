@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify, hasNonCommonName, isPreferredSymbol } from '../src/pipeline/universe.ts';
+import { classify, hasNonCommonName, isPartnership, isPreferredSymbol } from '../src/pipeline/universe.ts';
 import type { ScreenerRow } from '../src/fmp/types.ts';
 
 function row(symbol: string, companyName: string, extra: Partial<ScreenerRow> = {}): ScreenerRow {
@@ -40,6 +40,12 @@ const KEEP: Array<[string, string]> = [
   ['PPTA', 'Perpetua Resources Corp.'],
   ['UAL', 'United Airlines Holdings, Inc.'],
   ['NESR', 'National Energy Services Reunited Corp.'],
+  // Ordinary corporations with "Partners" in the name. A loose partnership
+  // match would wrongly exclude all of these.
+  ['CCEP', 'Coca-Cola Europacific Partners PLC'],
+  ['ROAD', 'Construction Partners, Inc.'],
+  ['SGRY', 'Surgery Partners, Inc.'],
+  ['PWP', 'Perella Weinberg Partners'],
 ];
 
 /** Real listings observed in the live FMP screener that must be excluded. */
@@ -73,6 +79,27 @@ describe('security-type exclusions', () => {
 
   it.each(DROP)('drops %s (%s) as %s', (symbol, name, reason) => {
     expect(classify(row(symbol, name))).toBe(reason);
+  });
+
+  it('drops publicly traded partnerships, which distribute K-1s', () => {
+    for (const [symbol, name] of [
+      ['EPD', 'Enterprise Products Partners L.P.'],
+      ['ET', 'Energy Transfer LP'],
+      ['MPLX', 'MPLX Lp'],
+      ['CQP', 'Cheniere Energy Partners, L.P.'],
+      ['BIP', 'Brookfield Infrastructure Partners L.P.'],
+      ['SUN', 'Sunoco LP'],
+    ] as [string, string][]) {
+      expect(classify(row(symbol, name)), symbol).toBe('partnership');
+    }
+  });
+
+  it('identifies partnerships by legal suffix, not by the word Partners', () => {
+    expect(isPartnership('Enterprise Products Partners L.P.')).toBe(true);
+    expect(isPartnership('Energy Transfer LP')).toBe(true);
+    expect(isPartnership('Coca-Cola Europacific Partners PLC')).toBe(false);
+    expect(isPartnership('Construction Partners, Inc.')).toBe(false);
+    expect(isPartnership('Surgery Partners, Inc.')).toBe(false);
   });
 
   it('drops SPACs by industry, not by name guesswork', () => {
