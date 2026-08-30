@@ -19,7 +19,7 @@ import {
 import type { Group } from './cluster.ts';
 import type { StockMetrics } from './momentum.ts';
 import type { ViewResult } from './score.ts';
-import { encodeSeries, type EncodedSeries } from './series.ts';
+import { encodeDisplaySeries, type EncodedSeries } from './series.ts';
 import type { UniverseMember } from './universe.ts';
 
 const r = (x: number, dp: number): number => {
@@ -91,7 +91,7 @@ export function buildSnapshot(input: SnapshotInput): Record<string, unknown> {
       marketCap: Math.round(member.marketCap),
       dollarVolume: Math.round(m.dollarVolume),
       horizons,
-      ...(series ? { series: encodeSeries(series) satisfies EncodedSeries } : {}),
+      ...(series ? { series: encodeDisplaySeries(series) satisfies EncodedSeries } : {}),
     };
   }
 
