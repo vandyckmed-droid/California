@@ -25,7 +25,7 @@ const MIN_INTERVAL_MS = 60_000;
 /** Which server version we have already reloaded for, so a bad one cannot loop. */
 const ATTEMPT_KEY = 'california.updateAttempt';
 
-/** @type {{ VERSION: string, ASSETS: string[] } | null} */
+/** @type {typeof import('./build.js') | null} */
 let build = null;
 let lastCheck = 0;
 let checking = false;
@@ -73,8 +73,7 @@ async function check() {
     // and old instead of reloading forever.
     if (attempted() === version) return;
     remember(version);
-    await Promise.all(build.ASSETS.map((/** @type {string} */ a) =>
-      fetch(a, { cache: 'reload' }).catch(() => {})));
+    await Promise.all(build.ASSETS.map((a) => fetch(a, { cache: 'reload' }).catch(() => {})));
     location.reload();
   } catch {
     // Offline, or a deploy in flight. Nothing is broken; check again next time

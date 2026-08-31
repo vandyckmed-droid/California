@@ -267,7 +267,8 @@ going to fetch anyway.
 Both generated files are gitignored. A committed stamp is wrong the moment anyone edits a file next
 to it, and a wrong stamp is worse than none — so an unstamped tree (a plain clone opened with
 `npx serve`) simply does not self-update, which is why `refresh.js` imports `build.js` dynamically
-and swallows the failure. The check gives any one server version a single attempt, recorded in
+and swallows the failure. `web/lib/build.d.ts` *is* committed, so that state typechecks: CI never
+stamps before `npm run typecheck`, which is what makes the unstamped tree the one it verifies. The check gives any one server version a single attempt, recorded in
 `sessionStorage`, so a deploy caught mid-flight leaves the app usable and old rather than reloading
 forever.
 

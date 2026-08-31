@@ -46,6 +46,9 @@ export function assetFiles(root) {
       // without reloading it — folding them in would only churn the version
       // every weekday and reload the app to no effect.
       if (rel === 'data' || rel === 'version.json' || rel === 'lib/build.js') continue;
+      // A type declaration is deployed but never loaded, so it is neither an
+      // asset to warm nor something whose contents can make a page stale.
+      if (rel.endsWith('.d.ts')) continue;
       if (statSync(path).isDirectory()) walk(path);
       else out.push(rel);
     }

@@ -18,6 +18,7 @@ function fixture(): string {
   writeFileSync(join(root, 'app.js'), 'export const a = 1;\n');
   writeFileSync(join(root, 'styles.css'), '.a{}\n');
   writeFileSync(join(root, 'lib', 'model.js'), 'export const m = 1;\n');
+  writeFileSync(join(root, 'lib', 'build.d.ts'), 'export declare const VERSION: string;\n');
   writeFileSync(join(root, 'views', 'labs', 'index.js'), 'export const l = 1;\n');
   writeFileSync(join(root, 'data', 'snapshot.json'), '{"asOf":"2026-08-31"}');
   writeFileSync(join(root, 'data', 'labs', 'etf-river.json'), '{"asOf":"2026-08-31"}');
@@ -44,6 +45,25 @@ describe('the build stamp', () => {
     // folding them in would move the version every weekday and reload the app
     // for data it was going to fetch anyway.
     expect(files.some((f: string) => f.startsWith('data/'))).toBe(false);
+    // And a type declaration is deployed but never loaded by the browser.
+    expect(files.some((f: string) => f.endsWith('.d.ts'))).toBe(false);
+  });
+
+  it('declares the module it generates, so an unstamped tree still typechecks', () => {
+    // lib/build.js is gitignored, so CI never sees one — which is the point:
+    // an unstamped tree is a supported state and has to be the state CI
+    // checks. The committed declaration is what keeps that honest, and it
+    // has to name exactly what the generator writes.
+    const decl = read('web/lib/build.d.ts');
+    const root = fixture();
+    stamp(root);
+    const generated = read(join(root, 'lib', 'build.js'));
+    for (const name of ['VERSION', 'ASSETS']) {
+      expect(decl, `build.d.ts does not declare ${name}`).toContain(`export declare const ${name}`);
+      expect(generated, `build.js does not export ${name}`).toContain(`export const ${name}`);
+    }
+    const tracked = execFileSync('git', ['ls-files', 'web/lib/build.d.ts'], { encoding: 'utf8' });
+    expect(tracked.trim()).toBe('web/lib/build.d.ts');
   });
 
   it('never hashes its own output', () => {
