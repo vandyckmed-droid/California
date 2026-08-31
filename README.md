@@ -22,7 +22,9 @@ npm run labs:etf-river      # ~10 seconds; the ETF River experiment's own sideca
 npm run serve               # then open http://localhost:5173
 ```
 
-`npm run screen -- --as-of 2026-08-28` reproduces a past run.
+`npm run screen -- --as-of 2026-08-28` reproduces a past run. `npm run serve` and
+`npm run verify:ui` stamp the build first (see **Staying current** below); `npm run stamp` does it
+on its own.
 
 **Financial Modeling Prep is the only data source.** If `API_KEY` is missing or rejected, the
 pipeline stops and says so. It never falls back to another provider or to synthetic data.
@@ -230,8 +232,45 @@ src/pipeline/correlation  126d returns + Pearson matrix
 src/pipeline/cluster      complete-linkage HAC
 src/pipeline/snapshot     stable serialization + dataHash
 web/                      static phone page (no framework)
+web/lib/refresh.js        the build check that keeps a home-screen page current
+scripts/stamp-version.mjs writes the build stamp the check compares against
 src/labs/                 Labs experiments; nothing above imports anything here
 ```
+
+## Staying current
+
+The page is meant to be saved to a phone's home screen, and that is the case where a static site
+goes wrong. iOS *relaunches* a home-screen window rather than reloading it — it restores whatever
+was last on screen, with no address bar and no pull-to-refresh to force the issue — so one session
+can serve the same code for weeks. GitHub Pages compounds it: every file goes out with a fixed
+`Cache-Control: max-age=600` that cannot be configured, so even a genuine reload may reuse what it
+already has.
+
+The data was never the problem — the snapshot and both sidecars are fetched `no-cache` and
+revalidate on every boot, which is why a merge to `main` shows up in the numbers but not in the
+code. So the code checks itself:
+
+- `scripts/stamp-version.mjs` runs last in the deploy, hashing the bytes *and* the names of every
+  file under `web/` except `data/`. It writes two things: `web/lib/build.js`, which rides inside the
+  module graph and therefore carries a stale version whenever the app itself is stale, and
+  `web/version.json`, the version the server is holding right now.
+- `web/lib/refresh.js` compares them at boot and again whenever the window returns to the
+  foreground — `visibilitychange` is the event a relaunch actually fires. On a mismatch it refetches
+  every asset with `cache: 'reload'` and only then reloads.
+
+Refetching first is what makes the update atomic. Each module has its own independent ten-minute
+window, so a bare reload can pair a new `app.js` with a view the cache still considers fresh, and a
+mixed build is harder to diagnose than a uniformly old one. `data/` is excluded from the hash on
+purpose: folding it in would move the version every weekday and reload the app for data it was
+going to fetch anyway.
+
+Both generated files are gitignored. A committed stamp is wrong the moment anyone edits a file next
+to it, and a wrong stamp is worse than none — so an unstamped tree (a plain clone opened with
+`npx serve`) simply does not self-update, which is why `refresh.js` imports `build.js` dynamically
+and swallows the failure. `web/lib/build.d.ts` *is* committed, so that state typechecks: CI never
+stamps before `npm run typecheck`, which is what makes the unstamped tree the one it verifies. The check gives any one server version a single attempt, recorded in
+`sessionStorage`, so a deploy caught mid-flight leaves the app usable and old rather than reloading
+forever.
 
 ## Labs
 
@@ -292,7 +331,8 @@ web/views/labs/etfRiver.js     its screen
 `npm test` covers the exclusion rules against real listings, the momentum and volatility math
 against closed-form answers, the 17.5% floor, winsorized z-scores, calendar alignment across a halt,
 and clustering invariants including permutation-invariance, plus the price-series
-encoder's round-trip accuracy. For ETF River it pins the two departures from that math as
+encoder's round-trip accuracy. It pins the build stamp's contract — that it skips `data/`, never
+hashes its own output, and moves for a rename that leaves every byte intact. For ETF River it pins the two departures from that math as
 properties — that the floor is absent and the horizon return unannualized, with values that would
 visibly move if either came back — along with the window anchors, the per-date standardization,
 what happens to a bad bar mid-window, and the redundancy screen's two bars.
@@ -306,7 +346,10 @@ chosen view. It also walks both Labs experiments — that the ranked list downlo
 opening one downloads none of the other, that a missing sidecar degrades to a sentence while every
 other screen keeps working, and for ETF River that a higher score is drawn higher, that the
 right-edge labels never stack, and that selecting a fund or a family emphasises exactly the trails
-it should. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).
+it should. It drives the update check against a real browser rather than reading the source for it:
+that a matching version leaves the page alone, that a moved one refetches every asset in the build
+before reloading and lands on a working screen, that a version gets one attempt and not a loop, and
+that a check which failed at boot is retried when the window next comes to the foreground. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).
 
 The pipeline additionally asserts its own invariants on every run: ranks are exactly 1..100, each
 threshold's grouping partitions the ranked list once, group members are in rank order, and no group

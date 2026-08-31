@@ -93,6 +93,14 @@ jobs:
             git push
           fi
 
+      # Last, so the stamp covers exactly the bytes being deployed. It is what
+      # lets a page already open on someone's home screen notice that a new
+      # build exists — GitHub Pages sends a fixed `max-age=600` on everything
+      # and offers no header control, so the page has to check for itself.
+      # Deliberately not committed: see scripts/stamp-version.mjs.
+      - name: Stamp the build version
+        run: node scripts/stamp-version.mjs
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

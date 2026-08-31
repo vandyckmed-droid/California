@@ -6,6 +6,7 @@
  * symbol, only when a chart or the watchlist actually needs one.
  */
 import { buildRows, METRICS, ranksFor, scoresFor } from './lib/model.js';
+import { watchForUpdates } from './lib/refresh.js';
 import { renderList } from './views/list.js';
 import { renderTicker } from './views/ticker.js';
 import { renderWatchlist } from './views/watchlist.js';
@@ -283,6 +284,9 @@ async function boot() {
   }
   rows = buildRows(snapshot);
   pruneWatchlist(snapshot.columns.symbol);
+  // Not awaited: the screen renders now, and the version check settles behind
+  // it. See lib/refresh.js for why a home-screen page needs one at all.
+  watchForUpdates();
   window.addEventListener('hashchange', () => rerender());
   rerender();
 }
