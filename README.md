@@ -18,6 +18,7 @@ There is no server and no database. The snapshot *is* the storage.
 npm install
 export API_KEY=...          # Financial Modeling Prep premium key
 npm run screen              # ~5 minutes; writes web/data/snapshot.json
+npm run labs:etf-river      # ~10 seconds; the ETF River experiment's own sidecar
 npm run serve               # then open http://localhost:5173
 ```
 
@@ -229,6 +230,61 @@ src/pipeline/correlation  126d returns + Pearson matrix
 src/pipeline/cluster      complete-linkage HAC
 src/pipeline/snapshot     stable serialization + dataHash
 web/                      static phone page (no framework)
+src/labs/                 Labs experiments; nothing above imports anything here
+```
+
+## Labs
+
+Experiments live behind a small `Labs ›` link on the list's title row. **Experiments may depend on
+stable Cali; stable Cali may never depend on experiments** — `tests/labs-boundary.test.ts` asserts
+that rather than trusting it, and asserts the same between the experiments themselves, so removing
+one is a delete rather than an untangling.
+
+| | |
+|---|---|
+| **Rank River** | Where the current top 20 have been over the last 30 sessions, backfilled from the prices a run already holds. Emitted at the tail of `npm run screen`, inside a `try` that cannot cost a day's snapshot. |
+| **ETF River** | A year of relative momentum leadership across 22 industry ETFs. Its own program: `npm run labs:etf-river`. |
+
+### ETF River
+
+A rolling cross-sectional relative-strength picture over ~20 deliberately distinct industry and
+theme ETFs, drawn as one trail per fund over the last 252 sessions. Height is the blended
+cross-sectional z-score, so a fund rises only by beating the others — a bull market lifts nothing.
+
+For each session, two volatility-adjusted momentum legs:
+
+```
+R12  = P[t−21] / P[t−252] − 1      AnnVol12 = stdev(daily returns over t−252 → t−21) × √252
+R6   = P[t−21] / P[t−126] − 1      AnnVol6  = stdev(daily returns over t−126 → t−21) × √252
+VA   = R / AnnVol                  (no floor)
+Z    = cross-sectional z-score of VA across the funds, per leg, per date
+Blend = 0.50 × Z12 + 0.50 × Z6
+```
+
+Two deliberate departures from the stock ranking above:
+
+- **No volatility floor.** The 17.5% floor exists to stop a *pinned* single name — an acquisition
+  target trading at a deal price — being rewarded for standing still. A sector fund cannot be
+  pinned that way, and 10.4% of leg-volatilities here fall below 17.5%, so applying it would
+  quietly compress the whole quiet half of the universe (`MOO`, `RWR`, `KIE`, `XHS`).
+- **No annualization of the horizon return.** Each leg is standardized within its own date, so its
+  fixed scale is already removed; annualizing first only adds a nonlinear transform that changes
+  no ordering.
+
+The universe is re-screened for redundancy on every run: a pair is flagged only when its daily
+returns move together (ρ ≥ 0.75 over the full fetched history) **and** its drawn paths coincide
+(path ρ ≥ 0.85, RMS gap ≤ 0.5z). `XPH` was removed on that test against `XBI`; nothing else in the
+current set clears both bars.
+
+The run refuses to write a wrong file. Every session's legs are recomputed for a deterministic
+sample by a second, deliberately naive implementation that indexes by date off the raw bars rather
+than by calendar position, every date's legs are checked to be mean 0 / sd 1, and the window
+anchors are printed as dates.
+
+```
+src/labs/etfRiver/        the experiment's own program, config, universe and signal
+web/data/labs/etf-river.json   its sidecar (~43 KB)
+web/views/labs/etfRiver.js     its screen
 ```
 
 ## Verification
@@ -236,14 +292,21 @@ web/                      static phone page (no framework)
 `npm test` covers the exclusion rules against real listings, the momentum and volatility math
 against closed-form answers, the 17.5% floor, winsorized z-scores, calendar alignment across a halt,
 and clustering invariants including permutation-invariance, plus the price-series
-encoder's round-trip accuracy.
+encoder's round-trip accuracy. For ETF River it pins the two departures from that math as
+properties — that the floor is absent and the horizon return unannualized, with values that would
+visibly move if either came back — along with the window anchors, the per-date standardization,
+what happens to a bad bar mid-window, and the redundancy screen's two bars.
 
 `npm run verify:ui` drives the built page in Chromium at a 390×844 phone viewport and asserts that
 each of the 24 view/threshold combinations renders all 100 names exactly once in ascending rank,
 that tap targets stay ≥ 44px, that nothing scrolls sideways, that the per-ticker chart draws the full
 series with all three horizon windows marked and the viewed one highlighted, that its labels stay
 legible, that the page loads nothing from a third-party host, and that the back button restores the
-chosen view. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).
+chosen view. It also walks both Labs experiments — that the ranked list downloads neither, that
+opening one downloads none of the other, that a missing sidecar degrades to a sentence while every
+other screen keeps working, and for ETF River that a higher score is drawn higher, that the
+right-edge labels never stack, and that selecting a fund or a family emphasises exactly the trails
+it should. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).
 
 The pipeline additionally asserts its own invariants on every run: ranks are exactly 1..100, each
 threshold's grouping partitions the ranked list once, group members are in rank order, and no group

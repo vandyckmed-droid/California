@@ -747,6 +747,205 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
   check('labs: the ranked list is unaffected by the sidecar being gone', coreOk > 0, String(coreOk));
 }
 
+// ---- Labs: ETF River -------------------------------------------------------
+// A second experiment, checked on its own terms. The point of the Labs boundary
+// is that these two share nothing, so the assertions do not share anything
+// either — including that opening one downloads none of the other.
+{
+  const etf = JSON.parse(readFileSync('web/data/labs/etf-river.json', 'utf8'));
+  const page = await newPage();
+  page.etfRequests = [];
+  page.otherLab = [];
+  page.on('request', (r) => {
+    if (/etf-river\.json/.test(r.url())) page.etfRequests.push(r.url());
+    if (/rank-history\.json|rankRiver\.js/.test(r.url())) page.otherLab.push(r.url());
+  });
+
+  await page.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.stock');
+  check('etf river: the ranked list downloads none of it', page.etfRequests.length === 0,
+    page.etfRequests.join(', '));
+
+  await page.click('.labs-link');
+  await page.waitForSelector('.lab .rows .stock');
+  const listed = await page.evaluate(() =>
+    [...document.querySelectorAll('.lab .rows .sym')].map((e) => e.textContent.trim()));
+  check('etf river: the index lists it beside the other experiment',
+    listed.includes('ETF River') && listed.includes('Rank River'), listed.join(','));
+
+  await page.goto(`${base}#/labs/etf-river`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('svg.etf-river', { timeout: 20000 });
+
+  const view = await page.evaluate(() => {
+    const trails = [...document.querySelectorAll('.etf-trail')];
+    const endY = (p) => {
+      const pts = [...(p.getAttribute('d') ?? '').matchAll(/[ML]([\d.]+),([\d.]+)/g)];
+      const last = pts[pts.length - 1];
+      return last ? { x: Number(last[1]), y: Number(last[2]) } : null;
+    };
+    return {
+      trails: trails.length,
+      symbols: trails.map((p) => p.dataset.symbol),
+      points: trails.map((p) => ((p.getAttribute('d') ?? '').match(/[ML]/g) ?? []).length),
+      ends: Object.fromEntries(trails.map((p) => [p.dataset.symbol, endY(p)])),
+      zero: !!document.querySelector('.etf-zero'),
+      zeroY: Number(document.querySelector('.etf-zero')?.getAttribute('y1')),
+      axis: [...document.querySelectorAll('.etf-axis span')].map((e) => e.textContent.trim()),
+      tags: [...document.querySelectorAll('.etf-tag')].map((e) => ({
+        symbol: e.dataset.symbol,
+        top: e.getBoundingClientRect().top,
+      })),
+      names: [...document.querySelectorAll('.etf-names button')].map((b) => b.dataset.symbol),
+      families: document.querySelectorAll('.etf-legend button').length,
+      dates: [...document.querySelectorAll('.etf-dates span')].map((e) => e.textContent.trim()),
+      chartH: Math.round(document.querySelector('svg.etf-river').getBoundingClientRect().height),
+      hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      foot: document.querySelector('.lab .foot')?.textContent ?? '',
+      readout: document.querySelector('.etf-readout')?.textContent ?? '',
+    };
+  });
+
+  const members = etf.members.map((m) => m.symbol);
+  check('etf river: one trail per fund in the sidecar',
+    view.trails === members.length && view.symbols.slice().sort().join(',') === members.slice().sort().join(','),
+    `${view.trails} trails / ${members.length} funds`);
+  check('etf river: trails span the year', view.points.every((n) => n > 20), view.points.join(','));
+  check('etf river: the chart has real height', view.chartH > 250, `${view.chartH}px`);
+  check('etf river: the axis is a z-score scale around zero',
+    view.zero && view.axis.includes('0') && view.axis.includes('+1') && view.axis.includes('−1'),
+    view.axis.join(' '));
+  check('etf river: today is the right edge', view.dates[view.dates.length - 1] === 'today',
+    view.dates.join(' → '));
+  check('etf river: it names its legend families', view.families === etf.families.length,
+    `${view.families} of ${etf.families.length}`);
+  check('etf river: no horizontal scroll', !view.hScroll);
+  check('etf river: it says the floor is not applied and the data is real',
+    /no volatility floor/i.test(view.foot) && /dividend-adjusted/i.test(view.foot),
+    view.foot.slice(0, 60));
+  check('etf river: the resting readout names today\'s leader',
+    view.readout.includes(etf.members[etf.today.reduce(
+      (best, t, i) => (t && (!etf.today[best] || t.blend > etf.today[best].blend) ? i : best), 0)].symbol),
+    view.readout.trim().slice(0, 60));
+
+  // The drawing must agree with the file: a higher blended score is drawn
+  // higher, and every trail ends on the same right edge.
+  {
+    const byScore = etf.members
+      .map((m, i) => ({ symbol: m.symbol, v: etf.today[i]?.blend }))
+      .filter((x) => typeof x.v === 'number')
+      .sort((a, b) => b.v - a.v);
+    const ys = byScore.map((x) => view.ends[x.symbol]?.y);
+    check('etf river: a higher score is drawn higher',
+      ys.every((y, i) => i === 0 || y >= ys[i - 1] - 1e-6), ys.slice(0, 4).join(' '));
+    const xs = Object.values(view.ends).map((e) => e?.x);
+    check('etf river: every trail reaches today', xs.every((x) => x === xs[0]), String(xs[0]));
+  }
+
+  // Right-edge labels: the ends, in order, and never stacked on each other.
+  {
+    const ordered = etf.members
+      .map((m, i) => ({ symbol: m.symbol, v: etf.today[i]?.blend }))
+      .sort((a, b) => b.v - a.v)
+      .map((x) => x.symbol);
+    const shown = view.tags.map((t) => t.symbol);
+    check('etf river: the edge names the leaders and the laggards',
+      shown.length > 4 && shown.length < members.length &&
+      shown.slice(0, 3).join(',') === ordered.slice(0, 3).join(',') &&
+      shown.slice(-2).join(',') === ordered.slice(-2).join(','),
+      shown.join(','));
+    const gaps = view.tags.slice(1).map((t, i) => t.top - view.tags[i].top);
+    check('etf river: no two labels sit on top of each other',
+      gaps.every((g) => g >= 11), gaps.map((g) => Math.round(g)).join(','));
+  }
+
+  {
+    const small = await tapAudit(page);
+    check('etf river: every control is >= 44px', small.length === 0, small.join(', '));
+  }
+  check('etf river: exactly one sidecar request', page.etfRequests.length === 1,
+    page.etfRequests.join(', '));
+  check('etf river: it downloads none of the other experiment', page.otherLab.length === 0,
+    page.otherLab.join(', '));
+
+  // Selecting a fund emphasises it and subordinates the rest.
+  await page.click('.etf-names button');
+  // Waited on the *faded* trails, not the emphasised one: the emphasised path
+  // is re-appended to lift it above the rest, and re-inserting a node skips its
+  // transition, so it reaches full opacity instantly while the other twenty-one
+  // are still 120ms from settling.
+  await page.waitForFunction(() => {
+    const off = document.querySelector('.etf-trail.off');
+    return off && parseFloat(getComputedStyle(off).opacity) < 0.2;
+  }, null, { timeout: 5000 });
+  const one = await page.evaluate(() => ({
+    on: document.querySelectorAll('.etf-trail.on').length,
+    off: document.querySelectorAll('.etf-trail.off').length,
+    pressed: document.querySelectorAll('.etf-names button[aria-pressed=true]').length,
+    onOpacity: parseFloat(getComputedStyle(document.querySelector('.etf-trail.on')).opacity),
+    offOpacity: parseFloat(getComputedStyle(document.querySelector('.etf-trail.off')).opacity),
+    labelled: [...document.querySelectorAll('.etf-tag.on')].map((e) => e.dataset.symbol),
+    readout: document.querySelector('.etf-readout')?.textContent ?? '',
+  }));
+  check('etf river: selecting a fund emphasises exactly one trail',
+    one.on === 1 && one.pressed === 1 && one.off === view.trails - 1, JSON.stringify(one));
+  check('etf river: the others actually recede', one.offOpacity < one.onOpacity / 4,
+    `${one.onOpacity} vs ${one.offOpacity}`);
+  check('etf river: the selected fund is named at the edge and in a sentence',
+    one.labelled.length === 1 && one.readout.includes('a year ago'),
+    `${one.labelled.join(',')} | ${one.readout.trim().slice(0, 50)}`);
+
+  await page.click('.etf-names button[aria-pressed=true]');
+  const cleared = await page.evaluate(() => document.querySelectorAll('.etf-trail.off').length);
+  check('etf river: selecting again clears it', cleared === 0, String(cleared));
+
+  // Selecting a family emphasises exactly its members — the question the
+  // colouring exists to answer.
+  await page.click('.etf-legend button');
+  await page.waitForFunction(() => document.querySelectorAll('.etf-trail.on').length > 0,
+    null, { timeout: 5000 });
+  const family = await page.evaluate(() => ({
+    on: [...document.querySelectorAll('.etf-trail.on')].map((p) => p.dataset.symbol).sort(),
+    pressed: document.querySelectorAll('.etf-legend button[aria-pressed=true]').length,
+  }));
+  const expected = etf.members.filter((m) => m.family === 0).map((m) => m.symbol).sort();
+  check('etf river: selecting a family emphasises exactly its funds',
+    family.pressed === 1 && family.on.join(',') === expected.join(','),
+    `${family.on.join(',')} vs ${expected.join(',')}`);
+
+  // Back pops, like every other in-app Back link.
+  {
+    const nav = await newPage();
+    await nav.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await nav.waitForSelector('.stock');
+    const start = await nav.evaluate(() => history.length);
+    await nav.click('.labs-link');
+    await nav.waitForSelector('.lab .rows .stock');
+    await nav.click('.lab .rows .stock:nth-child(2) .open');
+    await nav.waitForSelector('svg.etf-river', { timeout: 20000 });
+    await nav.click('.back');
+    await nav.waitForSelector('.lab .rows .stock');
+    const end = await nav.evaluate(() => history.length);
+    check('etf river: Back pops rather than pushing', end === start + 2, `${start} → ${end}`);
+  }
+
+  // Core, and the other experiment, keep working when this sidecar is gone.
+  const gone = await newPage('light', /etf-river\.json|404/);
+  await gone.route('**/etf-river.json', (r) => r.fulfill({ status: 404, body: 'gone' }));
+  await gone.goto(`${base}#/labs/etf-river`, { waitUntil: 'networkidle' });
+  await gone.waitForSelector('.lab .loading', { timeout: 15000 });
+  const sentence = await gone.evaluate(() => document.querySelector('.lab .loading')?.textContent ?? '');
+  check('etf river: a missing sidecar degrades to a sentence', /no etf river/i.test(sentence),
+    sentence.trim().slice(0, 60));
+  await gone.goto(`${base}#/labs/rank-river?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await gone.waitForSelector('svg.river', { timeout: 20000 });
+  check('etf river: the other experiment is unaffected',
+    (await gone.evaluate(() => document.querySelectorAll('.river-trail').length)) > 0);
+  await gone.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+  await gone.waitForSelector('.stock');
+  check('etf river: the ranked list is unaffected',
+    (await gone.evaluate(() => document.querySelectorAll('.stock').length)) > 0);
+}
+
 // ---- per-ticker screen -----------------------------------------------------
 const top = snapshot.columns.symbol[0];
 const detailPage = await newPage();

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "screen": "node src/run.ts",
+    "labs:etf-river": "node src/labs/etfRiver/run.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

@@ -1,5 +1,4 @@
 import { goBack, navigate } from '../../app.js';
-import { renderRankRiver } from './rankRiver.js';
 
 /**
  * Labs — experiments that are not part of the product yet.
@@ -9,19 +8,31 @@ import { renderRankRiver } from './rankRiver.js';
  * for it. Nothing in core imports anything under `views/labs/`; a test asserts
  * that, because the boundary is the reason an experiment is safe to keep.
  *
+ * Each experiment is imported lazily too, and for the same reason one step
+ * down: they are independent of each other, so opening one must not download
+ * the next. This menu is the only file that knows both of them exist, and
+ * removing an experiment is removing its entry and its files.
+ *
  * @param {HTMLElement} app
  * @param {string} sub  Path after `labs/`, empty for the index.
  */
 export function renderLabs(app, sub) {
-  if (sub === 'rank-river') return renderRankRiver(app);
-  return renderIndex(app);
+  const experiment = EXPERIMENTS.find((x) => x.slug === sub);
+  return experiment ? experiment.open(app) : renderIndex(app);
 }
 
 const EXPERIMENTS = [
   {
-    route: 'labs/rank-river',
+    slug: 'rank-river',
     name: 'Rank River',
     blurb: 'Where the current top 20 have been over the last 30 sessions.',
+    open: (app) => import('./rankRiver.js').then((m) => m.renderRankRiver(app)),
+  },
+  {
+    slug: 'etf-river',
+    name: 'ETF River',
+    blurb: 'A year of industry rotation across ~20 sector and theme ETFs.',
+    open: (app) => import('./etfRiver.js').then((m) => m.renderEtfRiver(app)),
   },
 ];
 
@@ -54,7 +65,7 @@ function renderIndex(app) {
     const open = document.createElement('a');
     open.className = 'open';
     open.href = '#';
-    open.addEventListener('click', (e) => { e.preventDefault(); navigate(x.route); });
+    open.addEventListener('click', (e) => { e.preventDefault(); navigate(`labs/${x.slug}`); });
     open.innerHTML = `<div class="rank"></div>
       <div class="ident"><div class="sym">${x.name}</div><div class="nm">${x.blurb}</div></div>`;
     item.append(open);
