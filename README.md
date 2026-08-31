@@ -290,6 +290,12 @@ A rolling cross-sectional relative-strength picture over ~20 deliberately distin
 theme ETFs, drawn as one trail per fund over the last 252 sessions. Height is the blended
 cross-sectional z-score, so a fund rises only by beating the others — a bull market lifts nothing.
 
+Every fund is drawn and every fund is listed, with the industry or theme it holds beside its
+ticker: `XSD` names nothing on its own. Decluttering is done by *selection*, not by removal — tap a
+family and the other trails recede — because any cut based on today's standing removes exactly the
+names worth watching. `XSW` sits 14th today and is climbing off a −1.9 trough; a filter on level
+would have hidden it for being weak, which is the one thing it is about to stop being.
+
 For each session, two volatility-adjusted momentum legs:
 
 ```
@@ -345,8 +351,9 @@ legible, that the page loads nothing from a third-party host, and that the back 
 chosen view. It also walks both Labs experiments — that the ranked list downloads neither, that
 opening one downloads none of the other, that a missing sidecar degrades to a sentence while every
 other screen keeps working, and for ETF River that a higher score is drawn higher, that the
-right-edge labels never stack, and that selecting a fund or a family emphasises exactly the trails
-it should. It drives the update check against a real browser rather than reading the source for it:
+right-edge labels never stack, that all 22 funds are listed with the industry each one holds and
+none is filtered out — the weakest fund included — and that selecting a fund or a family emphasises
+exactly the trails it should. It drives the update check against a real browser rather than reading the source for it:
 that a matching version leaves the page alone, that a moved one refetches every asset in the build
 before reloading and lands on a working screen, that a version gets one attempt and not a loop, and
 that a check which failed at boot is retried when the window next comes to the foreground. It needs `npm install --no-save playwright` and a Chromium build (`CHROME_PATH`).

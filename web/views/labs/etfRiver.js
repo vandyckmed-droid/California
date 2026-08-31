@@ -35,7 +35,8 @@ const PAD = 16;
  * away from its own line until the column is evenly spaced and says nothing —
  * a label that no longer sits at its value is worse than no label. So the edge
  * names the ends, which is what "who is leading" means, and the ordered list
- * below names everything. The selected fund is always labelled.
+ * below names every fund and says what each one holds. The selected fund is
+ * always labelled.
  */
 const LABEL_TOP = 5;
 const LABEL_BOTTOM = 3;
@@ -268,18 +269,30 @@ function draw(body, river) {
   });
   body.append(legend);
 
-  const chips = document.createElement('div');
-  chips.className = 'etf-names';
-  for (const x of ranked) {
+  // Every fund, in today's order, with what it actually holds beside its
+  // ticker. A ticker alone answers nothing — "XSD" is only semiconductors if
+  // you already knew — and the chart has room for a symbol at the edge but not
+  // for a phrase, so the naming happens here. Ordered and numbered, which is
+  // where "who is third" gets answered without spending the chart's own axis
+  // on it. Nothing is filtered: a fund climbing out of the bottom is exactly
+  // the one a level-based cut would remove.
+  const unscored = today.filter((x) => x.now === null);
+  const list = document.createElement('div');
+  list.className = 'etf-list';
+  ranked.concat(unscored).forEach((x, n) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = `etf-f${x.m.family}`;
+    b.className = `etf-row etf-f${x.m.family}`;
     b.dataset.symbol = x.m.symbol;
     b.setAttribute('aria-pressed', 'false');
-    b.innerHTML = `<i></i>${escapeHtml(x.m.symbol)} <span class="v">${fmt(x.now)}</span>`;
-    chips.append(b);
-  }
-  body.append(chips);
+    b.innerHTML =
+      `<span class="r">${x.now === null ? '—' : n + 1}</span><i></i>` +
+      `<b>${escapeHtml(x.m.symbol)}</b>` +
+      `<span class="what">${escapeHtml(x.m.label)}</span>` +
+      `<span class="v">${fmt(x.now)}</span>`;
+    list.append(b);
+  });
+  body.append(list);
 
   // ---- selection -----------------------------------------------------------
   // One fund, or one family, at a time. Selecting again clears it, so there is
@@ -299,7 +312,7 @@ function draw(body, river) {
       if (sel !== null && on) p.parentNode.append(p);
     }
     layoutEdge();
-    for (const b of chips.querySelectorAll('button')) {
+    for (const b of list.querySelectorAll('button')) {
       b.setAttribute('aria-pressed', String(sel?.type === 'fund' && sel.key === b.dataset.symbol));
     }
     for (const b of legend.querySelectorAll('button')) {
@@ -316,7 +329,7 @@ function draw(body, river) {
   for (const p of wrap.querySelectorAll('.etf-hit')) {
     p.addEventListener('click', () => select('fund', p.dataset.symbol));
   }
-  for (const b of chips.querySelectorAll('button')) {
+  for (const b of list.querySelectorAll('button')) {
     b.addEventListener('click', () => select('fund', b.dataset.symbol));
   }
   for (const b of legend.querySelectorAll('button')) {
