@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  CLEAN_MIN_HISTORY_SESSIONS,
   CONCURRENCY,
   CORR_WINDOW,
   HISTORY_CALENDAR_DAYS,
@@ -19,6 +20,14 @@ import {
 import { FmpAuthError, FmpClient, mapPool } from './fmp/client.ts';
 import type { History } from './fmp/types.ts';
 import { alignToCalendar, buildMasterCalendar, type AlignedSeries } from './pipeline/calendar.ts';
+import {
+  applyConcentrationCaps,
+  dedupeShareClasses,
+  seriesVerdict,
+  type Candidate,
+  type CleanupReason,
+  type Removal,
+} from './pipeline/cleanup.ts';
 import { completeLinkageGroups, type Group } from './pipeline/cluster.ts';
 import { correlationMatrix, windowReturns } from './pipeline/correlation.ts';
 import { buildRankHistory, sessionRanks } from './pipeline/rankHistory.ts';
@@ -154,24 +163,79 @@ async function main(): Promise<void> {
     log(`  ${HORIZONS[key].label}: ${anchors[key].start} -> ${anchors[key].end}`);
   }
 
-  log('aligning series and applying tradability gates');
+  log('aligning series, then cleaning the universe');
   const aligned = new Map<string, AlignedSeries>();
-  const metrics: StockMetrics[] = [];
+  const metricsBySymbol = new Map<string, StockMetrics>();
+  const removals: Removal[] = [];
+  const candidates: Candidate[] = [];
+  // Every measured quantity, kept or cut, so the report can show a
+  // distribution rather than only the tail each rule removed.
+  const measured: { symbol: string; shortVol: number | null; eventMove: number | null; missing: number }[] = [];
+
   for (const h of histories) {
     const member = memberBySymbol.get(h.symbol);
     if (!member) continue;
     const series = alignToCalendar(h, calendar);
+
+    // The cleanup runs before the momentum gates. Order matters for the
+    // report: a name pinned to a merger price still computes a perfectly
+    // finite 12-1 return, so letting computeMetrics judge it first would
+    // record it as eligible and hide the rule that should have caught it.
+    const v = seriesVerdict(series, member, L);
+    measured.push({ symbol: h.symbol, shortVol: v.shortVol, eventMove: v.eventMove, missing: v.missing });
+    if (v.reason) {
+      removals.push({ symbol: h.symbol, reason: v.reason, detail: cleanupDetail(v) });
+      continue;
+    }
+
     const res = computeMetrics(series, member, L, CORR_WINDOW);
     if (!res.ok) {
       bump(res.reason satisfies IneligibleReason);
       continue;
     }
     aligned.set(h.symbol, series);
-    metrics.push(res.metrics);
+    metricsBySymbol.set(h.symbol, res.metrics);
+    candidates.push({
+      symbol: h.symbol,
+      name: member.name,
+      sector: member.sector,
+      industry: member.industry,
+      dollarVolume: v.dollarVolume,
+    });
   }
+  candidates.sort((a, b) => (a.symbol < b.symbol ? -1 : 1));
+  const afterSeries = candidates.length;
+
+  // Share classes before the caps: two listings of one company would otherwise
+  // both count against their industry's ceiling, and the cap would trim a
+  // genuinely distinct third name to make room for a duplicate.
+  const deduped = dedupeShareClasses(candidates, new Map(
+    candidates.map((c) => [c.symbol, simpleReturns(closesForSeries(aligned.get(c.symbol) as AlignedSeries, L - CORR_WINDOW, L))]),
+  ));
+  removals.push(...deduped.removed);
+  const capped = applyConcentrationCaps(deduped.kept);
+  removals.push(...capped.removed);
+
+  const kept = new Set(capped.kept.map((c) => c.symbol));
+  for (const symbol of aligned.keys()) if (!kept.has(symbol)) aligned.delete(symbol);
+  const metrics: StockMetrics[] = capped.kept.map((c) => metricsBySymbol.get(c.symbol) as StockMetrics);
   // Fixed order for every downstream normalization and sum.
   metrics.sort((a, b) => (a.symbol < b.symbol ? -1 : 1));
-  log(`${metrics.length} names eligible (${JSON.stringify(ineligible)})`);
+
+  reportCleanup({
+    screened: universe.screenedCount,
+    afterStatic: universe.members.length,
+    fetched: histories.length,
+    afterSeries,
+    afterDedupe: deduped.kept.length,
+    afterCaps: capped.kept.length,
+    removals,
+    measured,
+    ineligible,
+    candidates,
+    final: capped.kept,
+  });
+  log(`${metrics.length} names eligible after cleanup (momentum gates: ${JSON.stringify(ineligible)})`);
 
   log('scoring all eight views');
   const views = buildViews(metrics);
@@ -252,6 +316,17 @@ async function main(): Promise<void> {
   // scoring and clustering the whole product rests on.
   assertInvariants(views, groupsByView);
 
+  // The snapshot already surfaces every screener rejection; the cleanup's are
+  // the same kind of fact and belong in the same place, or the universe stops
+  // being auditable exactly where it became opinionated.
+  const cleanupCounts: Record<string, number> = {};
+  const cleanupSamples: Record<string, string[]> = {};
+  for (const rm of removals) {
+    cleanupCounts[rm.reason] = (cleanupCounts[rm.reason] ?? 0) + 1;
+    const bucket = (cleanupSamples[rm.reason] ??= []);
+    if (bucket.length < 25) bucket.push(rm.symbol);
+  }
+
   const snapshot = buildSnapshot({
     asOf,
     chartDates,
@@ -262,8 +337,8 @@ async function main(): Promise<void> {
     clusters,
     screenedCount: universe.screenedCount,
     afterStaticExclusions: universe.members.length,
-    exclusions: { ...universe.exclusions, ...ineligible },
-    excludedSamples: universe.excludedSamples as Record<string, string[]>,
+    exclusions: { ...universe.exclusions, ...cleanupCounts, ...ineligible },
+    excludedSamples: { ...(universe.excludedSamples as Record<string, string[]>), ...cleanupSamples },
   });
 
   const dataDir = resolve(ROOT, 'web/data');
@@ -308,6 +383,123 @@ async function main(): Promise<void> {
       `largest ${largestSeries} B)`,
   );
   log(`dataHash ${meta.dataHash}`);
+}
+
+/** Closes over an inclusive index range of an aligned series. */
+function closesForSeries(series: AlignedSeries, from: number, to: number): number[] {
+  const out: number[] = [];
+  for (let i = Math.max(0, from); i <= to; i++) out.push(series.closes[i] as number);
+  return out;
+}
+
+/** What a rule actually measured, for the removal it produced. */
+function cleanupDetail(v: {
+  reason: CleanupReason | null;
+  shortVol: number | null;
+  eventMove: number | null;
+  recentMove: number | null;
+  missing: number;
+  dollarVolume: number;
+}): string {
+  const pct = (x: number | null) => (x === null ? '—' : `${(x * 100).toFixed(1)}%`);
+  switch (v.reason) {
+    case 'flatVolatility':
+      return `21d vol ${pct(v.shortVol)}`;
+    case 'postEventFlatline':
+      return `shock ${pct(v.eventMove)} then 21d vol ${pct(v.shortVol)}`;
+    case 'extremeOneDayMove':
+      return `one-day ${pct(v.recentMove)}`;
+    case 'missingSessions':
+      return `${v.missing} sessions absent`;
+    case 'illiquid':
+      return `$${(v.dollarVolume / 1e6).toFixed(2)}M/day`;
+    default:
+      return '';
+  }
+}
+
+/**
+ * The cleanup report.
+ *
+ * Printed by the run rather than by a separate analysis script, so the numbers
+ * quoted anywhere are the numbers the product actually used. A rule whose
+ * effect is only ever measured by a script beside the pipeline is a rule
+ * nobody checks again.
+ */
+function reportCleanup(r: {
+  screened: number;
+  afterStatic: number;
+  fetched: number;
+  afterSeries: number;
+  afterDedupe: number;
+  afterCaps: number;
+  removals: Removal[];
+  measured: { symbol: string; shortVol: number | null; eventMove: number | null; missing: number }[];
+  ineligible: Record<string, number>;
+  candidates: Candidate[];
+  final: Candidate[];
+}): void {
+  log('cleanup report');
+  log(`  screened ${r.screened} -> ${r.afterStatic} after static exclusions -> ${r.fetched} fetched`);
+  log(`  ${r.afterSeries} survive the series rules -> ${r.afterDedupe} after share classes -> ${r.afterCaps} after caps`);
+
+  const byReason = new Map<string, Removal[]>();
+  for (const rm of r.removals) {
+    (byReason.get(rm.reason) ?? byReason.set(rm.reason, []).get(rm.reason) as Removal[]).push(rm);
+  }
+  const ordered = [...byReason.entries()].sort((a, b) => b[1].length - a[1].length);
+  log('  removed by rule (most first), with examples:');
+  for (const [reason, list] of ordered) {
+    const sample = list
+      .slice()
+      .sort((a, b) => (a.symbol < b.symbol ? -1 : 1))
+      .slice(0, 6)
+      .map((x) => (x.detail ? `${x.symbol} (${x.detail})` : x.symbol));
+    log(`    ${reason.padEnd(22)} ${String(list.length).padStart(5)}   ${sample.join(', ')}`);
+  }
+
+  // The distribution behind the two volatility rules, so the thresholds can be
+  // judged against the shape of the data rather than only by their body count.
+  const vols = r.measured.map((m) => m.shortVol).filter((v): v is number => v !== null).sort((a, b) => a - b);
+  if (vols.length > 0) {
+    const at = (p: number) => `${((vols[Math.floor(p * (vols.length - 1))] as number) * 100).toFixed(1)}%`;
+    log(`  21d annualized vol across ${vols.length} names: p1 ${at(0.01)}, p5 ${at(0.05)}, p50 ${at(0.5)}, p95 ${at(0.95)}`);
+  }
+  const missing = r.measured.map((m) => m.missing).sort((a, b) => a - b);
+  if (missing.length > 0) {
+    const at = (p: number) => missing[Math.floor(p * (missing.length - 1))] as number;
+    const perfect = missing.filter((m) => m === 0).length;
+    log(
+      `  sessions absent of ${CLEAN_MIN_HISTORY_SESSIONS}: ${perfect} names miss none ` +
+        `(${((perfect / missing.length) * 100).toFixed(1)}%), p50 ${at(0.5)}, p90 ${at(0.9)}, p99 ${at(0.99)}`,
+    );
+  }
+
+  const share = (rows: readonly Candidate[], keyOf: (c: Candidate) => string) => {
+    const counts = new Map<string, number>();
+    for (const c of rows) {
+      const k = keyOf(c) || '(unclassified)';
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  for (const [label, keyOf] of [
+    ['sector', (c: Candidate) => c.sector],
+    ['industry', (c: Candidate) => c.industry],
+  ] as const) {
+    const before = share(r.candidates, keyOf);
+    const after = share(r.final, keyOf);
+    const afterMap = new Map(after);
+    log(`  top ${label}s, before -> after cleanup (share of universe):`);
+    for (const [key, n] of before.slice(0, 8)) {
+      const m = afterMap.get(key) ?? 0;
+      log(
+        `    ${key.slice(0, 34).padEnd(35)} ${String(n).padStart(4)} ` +
+          `(${((n / Math.max(r.candidates.length, 1)) * 100).toFixed(1)}%) -> ${String(m).padStart(4)} ` +
+          `(${((m / Math.max(r.final.length, 1)) * 100).toFixed(1)}%)`,
+      );
+    }
+  }
 }
 
 /**

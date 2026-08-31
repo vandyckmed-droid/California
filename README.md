@@ -29,6 +29,90 @@ on its own.
 **Financial Modeling Prep is the only data source.** If `API_KEY` is missing or rejected, the
 pipeline stops and says so. It never falls back to another provider or to synthetic data.
 
+## The cleanup layer
+
+The screener answers "is this a listed U.S. common stock". It cannot see that a
+name stopped moving the day its acquisition was agreed, that a 177% one-day print
+is a broken adjustment rather than a return, that two tickers are one company, or
+that a name listed fourteen months ago has no track record. Each of those ranks
+perfectly well and ranks on something that is not momentum.
+
+`src/pipeline/cleanup.ts` sits between the screener and the ranking. Every rule is
+a deterministic threshold on observable data; none consults a news feed or a
+corporate-actions endpoint, because a rule the run cannot evaluate identically
+twice is worse than no rule — and a pending merger is more reliably *observed*
+(a price pinned to the deal terms) than it is retrieved.
+
+| Rule | Threshold | Removed | Examples |
+|---|---|---:|---|
+| History | ≥ 756 sessions (3 years) | 384 | ABVX, AEBI |
+| Market cap | ≥ $500M | 325 | ABEO, ACU |
+| Liquidity | 252-day median dollar volume ≥ $5M | 282 | ACNB ($1.96M/day), ACEL ($3.49M) |
+| Complete series | a real bar on every master-calendar session | 31 | BMNR (121 absent), COSO (40) |
+| Flat volatility | 21-day annualized realized vol ≥ 5% | 17 | CRNX (1.9%), AES (2.8%), ACA (2.8%) |
+| Extreme one-day move | none ≥ 50% in the last 63 sessions | 8 | MRNA (177%), QURE (78%) |
+| Share classes | one listing per company | 6 | BRK-A, GOOG, FOX, NWS, ZG, PBR-A |
+| Post-event flatline | ≥ 20% shock in 126d, then 21d vol < 10% | 2 | UTZ (88.7% then 5.8%), ATAI |
+| Security type | ETF/ETN/SPAC/royalty-trust wrappers the vendor's flags miss | 19 | |
+| Concentration caps | industry ≤ 7.5%, sector ≤ 20% | 0 | (see below) |
+
+**2,572 → 2,280 names.** The counts are printed by the run itself rather than by a
+script beside it, so the numbers quoted here are the ones the product used.
+
+The two behavioural rules are the ones worth checking by eye, and they hold up.
+Every name the volatility floor removed is genuinely pinned — CRNX prints
+84.69, 84.78, 84.86, 84.84, 84.85, 84.84 on consecutive sessions, ACA sits at
+145.2x, AES at 14.7x — which is what an agreed all-cash deal looks like from the
+outside. **The rule finds acquisition targets from price behaviour alone, with no
+corporate-actions feed.**
+
+The extreme-move rule is less clean and the report says so. MRNA's 177% one-day
+print is a broken adjustment and removing it is unambiguously right. AMLX's 63.8%
+is a *real* biotech move on real news. Both are removed, and the justification
+has to cover both: momentum measured across a single 60% print is measuring that
+print, not a trend, and the vol-adjusted views then divide by a volatility the
+jump itself inflated. It is a defensible rule for two different reasons, not one
+rule doing one job — 8 names either way.
+
+### What the measurement changed
+
+Three parts of the starting specification did not survive contact with the data.
+
+- **ADRs are not excluded.** The rule is well-posed but nothing available
+  identifies one. Matching the name catches 9 listings out of 3,655 — it would
+  remove ARM, whose name carries "American Depositary Shares", and keep TSM,
+  BABA, MUFG and AZN, whose names do not. `country != US` catches 625 but
+  conflates a receipt with a foreign-domiciled company whose primary listing *is*
+  American, deleting Linde plc and Royal Bank of Canada. An inconsistently
+  applied rule is worse than an absent one: it removes real names while reading
+  in the exclusion counts as though the job were done. `CLEAN_EXCLUDE_ADR` keeps
+  the decision one edit away.
+- **SPACs are not matched by name.** Many are "<Something> Capital Corp", which is
+  also what a great many ordinary lenders are called, and no phrase separates
+  them. They are caught instead by FMP's own `Shell Companies` industry and by
+  the volatility floor — a pre-deal SPAC sits pinned near its trust value, which
+  is exactly what that floor looks for.
+- **The missing-session allowance stayed at zero.** Not for strictness: 3,312 of
+  3,343 names miss no session at all, and the ones that miss any tend to miss
+  121, 78, 40. There is no population of otherwise-fine names losing a single
+  halt day for an allowance to rescue — it would have spared 13.
+
+### The concentration caps do not bind
+
+The largest industry in the cleaned universe is Banks - Regional at 6.2%
+(Biotechnology is next at 6.1%), the largest sector is Financial Services at
+16.1%, and neither cap fires. That is the
+result, not a defect — but it is worth being precise about why, because the caps
+were asked for to solve a real problem.
+
+FMP's industry taxonomy is fine-grained ("Banks - Regional", "Software -
+Application", "Semiconductors"), so no single label reaches 7.5% of 2,280 names.
+Even a 5% cap would remove only ~54. The redundancy a momentum ranking actually
+suffers from — fifteen semiconductor names expressing one bet — is **not visible
+at the label level**. It lives in the correlation structure, which is what the
+existing grouping addresses. The caps are kept as armed guardrails against drift;
+they are not what will fix repeated trades in the Top 100.
+
 ## What it computes
 
 ### Universe
@@ -223,6 +307,7 @@ charting tools are wanted; it costs one anchor tag.
 src/config.ts             every tunable constant
 src/fmp/                  stable-API client: rate limiting, retry, hard-fail
 src/pipeline/universe     screener + exclusion rules
+src/pipeline/cleanup      the stricter layer between screening and ranking
 src/pipeline/calendar     master calendar, as-of alignment, coverage
 src/pipeline/momentum     per-horizon momentum + volatility + the floor, and the
                           trailing 126d volatility the list displays
