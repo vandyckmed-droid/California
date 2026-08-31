@@ -68,6 +68,18 @@ jobs:
           fi
           npm run screen
 
+      # Labs. Deliberately a separate step and a separate program: it fetches
+      # its own two dozen ETFs and writes its own sidecar, so it can neither
+      # slow the product refresh nor fail it. `continue-on-error` makes that
+      # explicit — a broken experiment leaves yesterday's river in place and
+      # publishes today's snapshot regardless.
+      - name: Refresh the ETF River sidecar (Labs)
+        if: github.event_name != 'push'
+        continue-on-error: true
+        env:
+          API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: npm run labs:etf-river
+
       - name: Commit refreshed snapshot
         if: github.event_name != 'push'
         run: |

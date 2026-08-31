@@ -363,3 +363,113 @@ td .floored { color: var(--faint); font-size: 10.5px; margin-left: 4px; }
   text-decoration: none; white-space: nowrap;
 }
 .labs-link:hover, .labs-link:active { color: var(--text); }
+
+/* ---------------------------------------------------------------------------
+   Labs: ETF River. Scoped under .etf-*, and independent of the Rank River
+   block above — deleting this block and web/views/labs/etfRiver.js removes the
+   experiment without touching a product style or the other experiment.
+
+   The six family colours are a validated categorical set: assigned in a fixed
+   order (never cycled), stepped separately for the dark surface rather than
+   flipped, and every trail is also named at the right edge, so identity is
+   never carried by colour alone.
+   --------------------------------------------------------------------------- */
+.etf-f0 { --etf: #2a78d6; }
+.etf-f1 { --etf: #eb6834; }
+.etf-f2 { --etf: #1baf7a; }
+.etf-f3 { --etf: #eda100; }
+.etf-f4 { --etf: #e87ba4; }
+.etf-f5 { --etf: #008300; }
+@media (prefers-color-scheme: dark) {
+  .etf-f0 { --etf: #3987e5; }
+  .etf-f1 { --etf: #d95926; }
+  .etf-f2 { --etf: #199e70; }
+  .etf-f3 { --etf: #c98500; }
+  .etf-f4 { --etf: #d55181; }
+  .etf-f5 { --etf: #008300; }
+}
+
+.etf-wrap {
+  position: relative; margin: 0 12px; padding-left: 26px; padding-right: 48px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+}
+.etf-river { display: block; width: 100%; height: 390px; }
+.etf-grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* The one line the whole chart is read against: the group's own middle. */
+.etf-zero { stroke: var(--border-strong); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.etf-trail {
+  /* Deliberately quiet. Twenty-two trails at full strength is the rainbow this
+     screen is trying not to be; at just over half opacity the mass reads as a
+     weave, the shape of the rotation comes through, and one tap lifts a single
+     line clear of it. */
+  fill: none; stroke: var(--etf, var(--text)); stroke-width: 1.3; opacity: .55;
+  stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke;
+  /* Pointers belong to the hit twins below, so an emphasised trail can be
+     raised above them without stealing its own deselecting tap. */
+  pointer-events: none;
+  transition: opacity .12s ease, stroke-width .12s ease;
+}
+.etf-trail.on { stroke-width: 2.6; opacity: 1; }
+.etf-trail.off { opacity: .07; }
+/* Invisible, wide, and the only thing that takes a pointer on the drawing. */
+.etf-hit {
+  fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.etf-axis { position: absolute; inset: 0; pointer-events: none; }
+.etf-axis span {
+  position: absolute; left: 3px; transform: translateY(-50%);
+  font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.etf-axis .zero { color: var(--muted); }
+
+/* Right-edge labels. Text in ink, identity carried by the swatch beside it. */
+.etf-edge { position: absolute; inset: 0 0 0 auto; width: 48px; pointer-events: none; }
+.etf-tag {
+  position: absolute; right: 4px; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 3px; white-space: nowrap;
+  font-size: 10.5px; font-weight: 560; color: var(--text);
+  font-variant-numeric: tabular-nums; transition: opacity .12s ease;
+}
+.etf-tag i { display: block; width: 7px; height: 2px; border-radius: 1px; background: var(--etf); }
+.etf-tag.off { opacity: .25; }
+.etf-tag.on { font-weight: 700; }
+
+.etf-dates {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin: 5px 14px 0; font-size: 10.5px; color: var(--faint);
+}
+.etf-hint { text-align: center; }
+
+.etf-readout {
+  margin: 10px 14px 2px; font-size: 12.5px; line-height: 1.5; color: var(--muted);
+  min-height: 38px;
+}
+.etf-readout b { color: var(--text); font-weight: 620; }
+
+.etf-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+/* One scrolling row, in today's order, the way the product's sector chips
+   already work. Twenty-two wrapped chips is a wall of buttons taller than the
+   chart it belongs to, and the chart is meant to be the screen. */
+.etf-names {
+  display: flex; gap: 6px; padding: 10px 12px 4px;
+  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.etf-names::-webkit-scrollbar { display: none; }
+.etf-names button { flex: 0 0 auto; }
+.etf-legend button, .etf-names button {
+  display: flex; align-items: center; gap: 6px;
+  min-height: var(--tap); padding: 0 11px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 560; cursor: pointer;
+}
+.etf-legend button { font-size: 11.5px; font-weight: 450; color: var(--muted); padding: 0 9px; }
+.etf-legend button i, .etf-names button i {
+  display: block; width: 9px; height: 3px; border-radius: 2px; background: var(--etf);
+}
+.etf-names button .v { color: var(--faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.etf-legend button[aria-pressed="true"], .etf-names button[aria-pressed="true"] {
+  border-color: var(--border-strong); background: var(--chip); color: var(--text);
+}
+.etf-names button[aria-pressed="true"] .v { color: var(--text); }

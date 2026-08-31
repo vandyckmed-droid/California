@@ -341,7 +341,12 @@ function writeRankHistory(
     // EACCES or EBUSY here would propagate out of `main()` and fail the run —
     // the one path by which this experiment could still cost a day's refresh,
     // which is precisely what the rest of this function exists to prevent.
-    rmSync(labsDir, { recursive: true, force: true });
+    //
+    // This experiment's own file, not the directory: web/data/labs/ is shared
+    // by every Labs sidecar, and other experiments have their own programs
+    // writing into it. Clearing the directory here would delete their output on
+    // every product run, which is the opposite of experiments being isolated.
+    rmSync(resolve(labsDir, 'rank-history.json'), { force: true });
     const started = Date.now();
     const history = buildRankHistory(symbols, aligned, calendar, L);
     const cols = (snapshot as { columns: { symbol: string[] } }).columns;
