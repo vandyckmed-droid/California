@@ -449,27 +449,41 @@ td .floored { color: var(--faint); font-size: 10.5px; margin-left: 4px; }
 .etf-readout b { color: var(--text); font-weight: 620; }
 
 .etf-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
-/* One scrolling row, in today's order, the way the product's sector chips
-   already work. Twenty-two wrapped chips is a wall of buttons taller than the
-   chart it belongs to, and the chart is meant to be the screen. */
-.etf-names {
-  display: flex; gap: 6px; padding: 10px 12px 4px;
-  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-}
-.etf-names::-webkit-scrollbar { display: none; }
-.etf-names button { flex: 0 0 auto; }
-.etf-legend button, .etf-names button {
+.etf-legend button {
   display: flex; align-items: center; gap: 6px;
-  min-height: var(--tap); padding: 0 11px; border-radius: 10px;
+  min-height: var(--tap); padding: 0 9px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--surface);
-  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 560; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 450; color: var(--muted); cursor: pointer;
 }
-.etf-legend button { font-size: 11.5px; font-weight: 450; color: var(--muted); padding: 0 9px; }
-.etf-legend button i, .etf-names button i {
-  display: block; width: 9px; height: 3px; border-radius: 2px; background: var(--etf);
-}
-.etf-names button .v { color: var(--faint); font-weight: 400; font-variant-numeric: tabular-nums; }
-.etf-legend button[aria-pressed="true"], .etf-names button[aria-pressed="true"] {
+.etf-legend button i { display: block; width: 9px; height: 3px; border-radius: 2px; background: var(--etf); }
+.etf-legend button[aria-pressed="true"] {
   border-color: var(--border-strong); background: var(--chip); color: var(--text);
 }
-.etf-names button[aria-pressed="true"] .v { color: var(--text); }
+
+/* Where a ticker meets what it actually holds. Rows rather than chips: a chip
+   fits "XSD" and a number, and the phrase that makes XSD mean something does
+   not fit beside it. A scrolling row also hid two thirds of the universe
+   off-screen, which is the wrong place for the only list that names them. */
+.etf-list { display: flex; flex-direction: column; padding: 8px 12px 0; }
+.etf-list button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: var(--tap); padding: 0 8px; border: 0; border-radius: 9px;
+  background: none; color: var(--text); font: inherit; font-size: 13px;
+  text-align: left; cursor: pointer;
+}
+.etf-list button + button { box-shadow: inset 0 1px 0 var(--border); }
+.etf-list .r {
+  flex: 0 0 18px; text-align: right; font-size: 11.5px; color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.etf-list i { flex: 0 0 auto; display: block; width: 9px; height: 3px; border-radius: 2px; background: var(--etf); }
+.etf-list b { flex: 0 0 42px; font-weight: 620; }
+/* The label is the point of the row, so it takes the slack and truncates last. */
+.etf-list .what {
+  flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12px; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.etf-list .v { flex: 0 0 auto; color: var(--faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.etf-list button[aria-pressed="true"] { background: var(--chip); }
+.etf-list button[aria-pressed="true"] .v,
+.etf-list button[aria-pressed="true"] .what { color: var(--text); }

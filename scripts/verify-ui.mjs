@@ -795,7 +795,11 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
         symbol: e.dataset.symbol,
         top: e.getBoundingClientRect().top,
       })),
-      names: [...document.querySelectorAll('.etf-names button')].map((b) => b.dataset.symbol),
+      names: [...document.querySelectorAll('.etf-list button')].map((b) => b.dataset.symbol),
+      labelled: [...document.querySelectorAll('.etf-list button')].map((b) => ({
+        symbol: b.dataset.symbol,
+        what: b.querySelector('.what')?.textContent.trim() ?? '',
+      })),
       families: document.querySelectorAll('.etf-legend button').length,
       dates: [...document.querySelectorAll('.etf-dates span')].map((e) => e.textContent.trim()),
       chartH: Math.round(document.querySelector('svg.etf-river').getBoundingClientRect().height),
@@ -818,6 +822,29 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
     view.dates.join(' → '));
   check('etf river: it names its legend families', view.families === etf.families.length,
     `${view.families} of ${etf.families.length}`);
+
+  // The list is the only place a ticker is explained, so "every fund, with the
+  // industry it stands for" is the assertion — not "a list exists".
+  {
+    const want = new Map(etf.members.map((m) => [m.symbol, m.label]));
+    const missing = [...want.keys()].filter((sym) => !view.names.includes(sym));
+    check('etf river: every fund is listed, none filtered out',
+      view.names.length === etf.members.length && missing.length === 0,
+      missing.length ? `missing ${missing.join(',')}` : `${view.names.length} listed`);
+    const wrong = view.labelled.filter((row) => row.what !== want.get(row.symbol));
+    check('etf river: each fund says which industry or theme it holds',
+      wrong.length === 0 && view.labelled.every((row) => row.what.length > 2),
+      wrong.map((r) => `${r.symbol}="${r.what}"`).join(' ').slice(0, 90));
+    // A weak name that is climbing has to survive to the list, which is the
+    // case a score-ordered cut would quietly drop.
+    const weakest = etf.members
+      .map((m, i) => ({ symbol: m.symbol, v: etf.today[i]?.blend }))
+      .filter((x) => typeof x.v === 'number')
+      .sort((a, b) => a.v - b.v)[0];
+    check('etf river: the weakest fund is still named and still drawn',
+      view.names.includes(weakest.symbol) && view.symbols.includes(weakest.symbol),
+      weakest.symbol);
+  }
   check('etf river: no horizontal scroll', !view.hScroll);
   check('etf river: it says the floor is not applied and the data is real',
     /no volatility floor/i.test(view.foot) && /dividend-adjusted/i.test(view.foot),
@@ -868,7 +895,7 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
     page.otherLab.join(', '));
 
   // Selecting a fund emphasises it and subordinates the rest.
-  await page.click('.etf-names button');
+  await page.click('.etf-list button');
   // Waited on the *faded* trails, not the emphasised one: the emphasised path
   // is re-appended to lift it above the rest, and re-inserting a node skips its
   // transition, so it reaches full opacity instantly while the other twenty-one
@@ -880,7 +907,7 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
   const one = await page.evaluate(() => ({
     on: document.querySelectorAll('.etf-trail.on').length,
     off: document.querySelectorAll('.etf-trail.off').length,
-    pressed: document.querySelectorAll('.etf-names button[aria-pressed=true]').length,
+    pressed: document.querySelectorAll('.etf-list button[aria-pressed=true]').length,
     onOpacity: parseFloat(getComputedStyle(document.querySelector('.etf-trail.on')).opacity),
     offOpacity: parseFloat(getComputedStyle(document.querySelector('.etf-trail.off')).opacity),
     labelled: [...document.querySelectorAll('.etf-tag.on')].map((e) => e.dataset.symbol),
@@ -894,7 +921,7 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
     one.labelled.length === 1 && one.readout.includes('a year ago'),
     `${one.labelled.join(',')} | ${one.readout.trim().slice(0, 50)}`);
 
-  await page.click('.etf-names button[aria-pressed=true]');
+  await page.click('.etf-list button[aria-pressed=true]');
   const cleared = await page.evaluate(() => document.querySelectorAll('.etf-trail.off').length);
   check('etf river: selecting again clears it', cleared === 0, String(cleared));
 
