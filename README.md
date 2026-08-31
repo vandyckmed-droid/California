@@ -368,6 +368,7 @@ one is a delete rather than an untangling.
 |---|---|
 | **Rank River** | Where the current top 20 have been over the last 30 sessions, backfilled from the prices a run already holds. Emitted at the tail of `npm run screen`, inside a `try` that cannot cost a day's snapshot. |
 | **ETF River** | A year of relative momentum leadership across 22 industry ETFs. Its own program: `npm run labs:etf-river`. |
+| **ETF Basis** | A research study, not a screen: can 2,280 stocks be compressed into a small set of ETF bets? Answer: no — see [docs/etf-basis-research.md](docs/etf-basis-research.md). `npm run labs:etf-basis`. |
 
 ### ETF River
 
