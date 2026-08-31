@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 .env
 .cache/
+
+# Generated at deploy time by scripts/stamp-version.mjs. Committing a stamp
+# would freeze it at whatever the tree looked like when it was written.
+web/lib/build.js
+web/version.json

@@ -1115,6 +1115,89 @@ check('performance: a filter change re-renders under 200ms', perf.rerender < 200
 check('performance: the whole home screen is under 200 KB on the wire',
   perf.transferred < 200, `${perf.transferred} KB`);
 
+// ---- staying current on a home screen ---------------------------------------
+// The page is saved to a phone's home screen, so it is relaunched rather than
+// reloaded and can sit on one build indefinitely. These checks drive the real
+// mechanism — a version the server moved, and the reload it is supposed to
+// provoke — rather than asserting that the code reads correctly.
+{
+  const { version: served } = JSON.parse(readFileSync('web/version.json', 'utf8'));
+  const build = readFileSync('web/lib/build.js', 'utf8');
+  check('update: the stamp the page carries matches the one it will fetch',
+    build.includes(JSON.stringify(served)), served);
+
+  // A matching version must leave the page alone. A check that reloads when
+  // nothing changed is a reload loop wearing a disguise.
+  {
+    const page = await newPage();
+    await page.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await page.evaluate(() => { window.__survived = true; });
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+    check('update: an unchanged version does not reload the page',
+      await page.evaluate(() => window.__survived === true));
+    await page.close();
+  }
+
+  // A moved version must refetch the whole build and reload. Counting load
+  // events is the detector: a flag set from the test races the reload it is
+  // trying to observe, because the update can land before `goto` even returns.
+  {
+    const page = await newPage();
+    const refetched = new Set();
+    page.on('request', (r) => {
+      const u = new URL(r.url());
+      if (u.pathname !== '/version.json') refetched.add(u.pathname.replace(/^\//, ''));
+    });
+    let loads = 0;
+    page.on('load', () => { loads += 1; });
+    await page.route('**/version.json', (r) =>
+      r.fulfill({ status: 200, contentType: 'application/json', body: '{"version":"deadbeef0000"}' }));
+    await page.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => document.querySelector('.stock') !== null, null, { timeout: 5000 });
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+    check('update: a moved version reloads the page', loads >= 2, `loads=${loads}`);
+    // And lands on a working screen, not a blank one mid-reload.
+    check('update: the reloaded page renders',
+      await page.evaluate(() => document.querySelectorAll('.stock').length > 0));
+
+    // Every module, not just the one that noticed. Each file carries its own
+    // ten-minute window, so a bare reload can pair a new app.js with a view
+    // the cache still considers fresh.
+    const assets = JSON.parse(build.slice(build.indexOf('['), build.lastIndexOf(']') + 1));
+    const missed = assets.filter((a) => !refetched.has(a));
+    check('update: it refetches the whole build, not just the module that noticed',
+      missed.length === 0, missed.join(', '));
+
+    // And it must stop. Same page, still mismatched: one attempt, no loop.
+    const before = loads;
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 800)));
+    check('update: it gives a version one attempt, then stops', loads === before,
+      `${loads - before} extra load(s)`);
+    await page.close();
+  }
+
+  // Offline at boot must not spend the attempt: the next foreground retries.
+  {
+    const page = await newPage('light', /503|Service Unavailable/);
+    let fail = true;
+    await page.route('**/version.json', (r) => fail
+      ? r.fulfill({ status: 503, body: 'down' })
+      : r.fulfill({ status: 200, contentType: 'application/json', body: '{"version":"deadbeef0001"}' }));
+    await page.goto(`${base}#/?score=h12_1&mode=raw`, { waitUntil: 'networkidle' });
+    await page.evaluate(() => { window.__survived = true; });
+    check('update: a failed check leaves the page running',
+      await page.evaluate(() => window.__survived === true));
+    fail = false;
+    // What a relaunch from the icon actually fires. There is no load event.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => window.__survived === undefined, null, { timeout: 5000 })
+      .catch(() => {});
+    check('update: coming back to the foreground retries and picks it up',
+      await page.evaluate(() => window.__survived === undefined));
+    await page.close();
+  }
+}
+
 await browser.close();
 server.close();
 
