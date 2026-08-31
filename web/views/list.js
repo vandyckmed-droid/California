@@ -66,6 +66,17 @@ function headerParts(snapshot, matched, total) {
   head.className = 'head';
   head.innerHTML = `<h1>Momentum <span class="as-of">${snapshot.meta.asOf}</span></h1>`;
 
+  // The only reference to Labs anywhere in the product. It sits on the title
+  // row because the alternative was the footer, and the footer of this screen
+  // is below 2,572 rows — which is not "discreet", it is unreachable. Quiet
+  // enough not to compete with the ranking, present without a scroll.
+  const labs = document.createElement('a');
+  labs.className = 'labs-link';
+  labs.href = '#/labs';
+  labs.textContent = 'Labs ›';
+  labs.addEventListener('click', (e) => { e.preventDefault(); navigate('labs'); });
+  head.querySelector('h1').append(labs);
+
   const viewbar = document.createElement('div');
   viewbar.className = 'viewbar';
   viewbar.append(
@@ -294,16 +305,6 @@ function paintRows(body, snapshot, matches) {
     Filtering hides rows; it never renumbers them.<br>
     Data: Financial Modeling Prep · <code>${snapshot.meta.dataHash.slice(0, 16)}</code>`;
   body.append(foot);
-
-  // The only reference to Labs anywhere in the product, and deliberately the
-  // quietest thing on the screen: an experiment should be findable without
-  // competing with the ranking for attention.
-  const labs = document.createElement('a');
-  labs.className = 'labs-link';
-  labs.href = '#/labs';
-  labs.textContent = 'Labs — experiments ›';
-  labs.addEventListener('click', (e) => { e.preventDefault(); navigate('labs'); });
-  body.append(labs);
 }
 
 /**

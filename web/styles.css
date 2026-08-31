@@ -349,9 +349,17 @@ td .floored { color: var(--faint); font-size: 10.5px; margin-left: 4px; }
 }
 .river-names button[aria-pressed="true"] .r { color: var(--pos); }
 
-/* The Labs entry point on the list: secondary by construction. */
+/* The Labs entry point, on the title row and pushed to the right edge.
+   The padding/negative-margin pair gives it a full 44px hit area without
+   making the header 44px tall — the visual footprint stays the size of the
+   text while the tap target is thumb-sized. */
 .labs-link {
-  display: inline-block; margin-top: 8px; min-height: var(--tap); line-height: var(--tap);
-  padding: 0 2px; color: var(--muted); font-size: 11.5px; text-decoration: none;
+  margin-left: auto;
+  padding: 13px 2px; margin-top: -13px; margin-bottom: -13px;
+  /* Pinned rather than inherited: 13 + 18 + 13 = 44 exactly. Left to the
+     font's own line box it came out 43px and failed the tap-target sweep. */
+  line-height: 18px;
+  color: var(--faint); font-size: 11.5px; font-weight: 450;
+  text-decoration: none; white-space: nowrap;
 }
-.labs-link:hover { color: var(--text); }
+.labs-link:hover, .labs-link:active { color: var(--text); }
