@@ -562,10 +562,27 @@ check('watchlist: the empty state explains itself', /tap/i.test(empty), empty);
 
   const link = await labs.evaluate(() => {
     const a = document.querySelector('.labs-link');
-    return a ? { text: a.textContent.trim(), h: a.getBoundingClientRect().height } : null;
+    if (!a) return null;
+    const r = a.getBoundingClientRect();
+    return {
+      text: a.textContent.trim(),
+      h: Math.round(r.height),
+      top: Math.round(r.top),
+      scrollY: window.scrollY,
+      headerH: Math.round(document.querySelector('.head').getBoundingClientRect().height),
+    };
   });
   check('labs: a secondary entry point exists on the list',
     !!link && /labs/i.test(link.text), JSON.stringify(link));
+  // The real requirement, and the one the first version failed: it must be
+  // reachable. It was in the footer, below 2,572 rows, which is discreet only
+  // in the sense that nobody will ever find it.
+  check('labs: the entry point is visible without scrolling',
+    !!link && link.scrollY === 0 && link.top >= 0 && link.top < 120,
+    JSON.stringify(link));
+  // Reachable, but still not allowed to bloat the header it sits on.
+  check('labs: it does not inflate the header',
+    !!link && link.headerH <= 56, `header ${link?.headerH}px`);
   check('labs: the entry point is not a primary tab',
     await labs.evaluate(() => !document.querySelector('nav, [role=tablist], .tabbar')));
 
