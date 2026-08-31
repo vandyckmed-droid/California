@@ -43,7 +43,7 @@ units — three further rules apply:
 The name rule is phrase-anchored rather than keyed on bare words precisely because
 `\bpreferred\b` and `\bseries [A-Z]\b` were observed excluding two real common stocks.
 
-Then data-driven tradability gates: market cap ≥ $1B, price ≥ $5, average daily dollar volume ≥ $5M,
+Then data-driven tradability gates: market cap ≥ $200M, price ≥ $5, average daily dollar volume ≥ $5M,
 and a real bar on ≥ 95% of the sessions spanning every horizon and the correlation window — which
 also removes recent IPOs and heavily halted names. One eligibility test serves all eight views.
 
