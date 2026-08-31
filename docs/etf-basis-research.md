@@ -11,6 +11,9 @@ coarser one.
 Study date 2026-08-28 · 756 sessions (2023-08-23 → 2026-08-28) · 2,280 cleaned stocks ·
 75 candidate ETFs · reproduce with `npm run labs:etf-basis`.
 
+**Visual version with the charts:** <https://claude.ai/code/artifact/959a19b5-4bc6-4d68-9c4d-b581fd40b8fd>
+(source kept alongside this file as `docs/compression-ceiling.html`).
+
 ---
 
 ## Changes I made to the proposed plan
