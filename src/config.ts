@@ -30,6 +30,133 @@ export const MIN_PRICE = 5;
 export const MIN_MEDIAN_DOLLAR_VOLUME = 5_000_000;
 
 // ---------------------------------------------------------------------------
+// Cleanup layer
+//
+// The gates above decide what FMP will return. These decide what survives
+// contact with the actual price series, and they are deliberately stricter:
+// a name that clears a screener and then turns out to have been pinned to a
+// merger price for four months ranks on the acquirer's offer, not on momentum.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cap floor for the cleaned universe.
+ *
+ * Higher than MIN_MARKET_CAP above, which stays where it is because it governs
+ * what is *fetched*: the run needs the wider set in hand to measure what the
+ * cleanup removes, and a screener floor cannot be revisited without re-running
+ * the whole fetch.
+ */
+export const CLEAN_MIN_MARKET_CAP = 500_000_000;
+
+/**
+ * History a name must have before it is rankable: three years, not one.
+ *
+ * The longest momentum horizon needs 252 sessions, so this is not a horizon
+ * requirement — it is a quality one. A name with three years of continuous
+ * prints has demonstrated that it trades; a name with exactly enough history
+ * for the 12-1 window has demonstrated only that it listed a year ago.
+ */
+export const CLEAN_MIN_HISTORY_SESSIONS = 756;
+
+/**
+ * Master-calendar sessions a name may miss inside that span. Zero, as specified.
+ *
+ * Kept at zero because the data says an allowance buys nothing. Measured over
+ * the live universe, 3,304 of 3,335 names miss no session at all and the
+ * distribution is zero at the 99th percentile; the names that miss any tend to
+ * miss a great many (121, 78, 40). There is no population of otherwise-fine
+ * names losing a single halt day for an allowance to rescue — it would have
+ * spared 13 names and blurred a rule that is currently exact.
+ */
+export const CLEAN_MISSING_SESSION_ALLOWANCE = 0;
+
+/** Liquidity, measured over a year rather than the correlation window. */
+export const CLEAN_DOLLAR_VOLUME_WINDOW = 252;
+export const CLEAN_MIN_MEDIAN_DOLLAR_VOLUME = 5_000_000;
+
+/**
+ * The window every "has this name stopped moving" test is measured over.
+ *
+ * One month. Short enough that a deal announced last quarter shows up now,
+ * long enough that a quiet fortnight does not.
+ */
+export const SHORT_VOL_WINDOW = 21;
+
+/** Below this annualized realized volatility a listed equity is not trading. */
+export const MIN_REALIZED_VOL = 0.05;
+
+/**
+ * The post-event flatline: a large shock, and then nothing.
+ *
+ * This is what an agreed acquisition looks like from the outside — a jump to
+ * the deal price on announcement, then a pinned quote until it closes. The
+ * event window ends where the volatility window begins so the shock cannot
+ * inflate the calm it is being compared against.
+ */
+export const FLATLINE_EVENT_WINDOW = 126;
+export const FLATLINE_EVENT_THRESHOLD = 0.20;
+export const FLATLINE_VOL_CEILING = 0.10;
+
+/**
+ * A one-day move this large in a split- and dividend-adjusted series.
+ *
+ * Far more often an unapplied corporate action than a return. Either way the
+ * momentum computed across it is arithmetic on two incomparable prices.
+ */
+export const EXTREME_MOVE_WINDOW = 63;
+export const EXTREME_MOVE_THRESHOLD = 0.50;
+
+/**
+ * How alike two listings must trade before a name match is allowed to merge
+ * them. Share classes of one company are near-identical; two companies that
+ * merely share a word in their names are not.
+ */
+export const SHARE_CLASS_MIN_CORR = 0.95;
+
+/**
+ * Concentration ceilings, as a share of the universe at the point each runs.
+ *
+ * Both are currently inert, and that is the finding rather than a bug: the
+ * largest industry in the cleaned universe is Banks - Regional at 6.2% and the
+ * largest sector is Financial Services at 16.0%, so neither cap binds. They are
+ * kept as armed guardrails — they cost one pass and catch drift — but nothing
+ * in this layer is trimming for concentration today.
+ *
+ * The reason is worth stating: FMP's industry taxonomy is fine-grained enough
+ * ("Banks - Regional", "Software - Application", "Semiconductors") that no
+ * single label reaches 7.5% of 2,283 names. The redundancy a momentum ranking
+ * actually suffers from — fifteen semiconductor names expressing one bet — is
+ * not visible at the label level at all. It lives in the correlation structure,
+ * which is what the existing grouping addresses.
+ */
+export const INDUSTRY_CAP_FRACTION = 0.075;
+export const SECTOR_CAP_FRACTION = 0.20;
+
+/**
+ * Whether the cleanup treats an ADR as outside a U.S. common-stock universe.
+ *
+ * Off, and this is the one place the implementation departs from its starting
+ * specification. The rule is well-posed — an ADR is a receipt for a listing
+ * whose primary market is elsewhere — but nothing in the data identifies one:
+ *
+ *  - Matching the name catches 9 listings out of 3,655. It would remove ARM,
+ *    whose name happens to carry "American Depositary Shares", while keeping
+ *    TSM, BABA, MUFG, NVS and AZN, whose names do not. That is not the rule
+ *    partially applied, it is an arbitrary sample of it.
+ *  - `country != US` catches 625, but conflates a genuine ADR with a
+ *    foreign-domiciled company whose primary listing *is* American: it would
+ *    delete Linde plc, Royal Bank of Canada and Arm Holdings alongside the
+ *    receipts, and FMP already places PDD in Ireland and Trip.com in Singapore.
+ *  - The `stable` endpoints this client uses expose no ADR flag.
+ *
+ * An inconsistently applied rule is worse than an absent one: it removes real
+ * names and leaves the class it was aimed at largely intact, while reading in
+ * the exclusion counts as though the job were done. The flag stays so the
+ * decision is one edit away if a reliable classification appears.
+ */
+export const CLEAN_EXCLUDE_ADR = false;
+
+// ---------------------------------------------------------------------------
 // Momentum horizons. Every horizon ends at `skip` trading days back, which is
 // what makes this a "12-1" style signal: the most recent month is excluded.
 // ---------------------------------------------------------------------------
@@ -175,8 +302,16 @@ export const RATE_LIMIT_DECAY_AFTER_CLEAN = 50;
  */
 export const MAX_FETCH_FAILURES = 0;
 
-/** Calendar days of history to request. Must comfortably exceed MAX_LOOKBACK trading days. */
-export const HISTORY_CALENDAR_DAYS = 540;
+/**
+ * Calendar days of history to request.
+ *
+ * Sized by the cleanup layer, not by the horizons: CLEAN_MIN_HISTORY_SESSIONS
+ * is 756 trading days, which is about 1,096 calendar days, and the master
+ * calendar has to reach past that with room for the run to sit on a holiday.
+ * The request count is unchanged — this is one call per name either way — so
+ * the cost is response size rather than rate limit.
+ */
+export const HISTORY_CALENDAR_DAYS = 1_150;
 
 // ---------------------------------------------------------------------------
 // Views: (horizon | blend) x (raw | vol-adjusted)

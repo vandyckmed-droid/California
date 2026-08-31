@@ -1,0 +1,499 @@
+<title>The Compression Ceiling</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  color-scheme: light;
+  --paper:   #eef1f3;
+  --surface: #ffffff;
+  --sunk:    #e4e9ec;
+  --ink:     #131a20;
+  --ink-2:   #3d4c55;
+  --muted:   #64757e;
+  --rule:    #d3dcE0;
+  --rule-2:  #e6ecee;
+  --accent:  #1f6f8b;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --neg: #b04a2f;
+  --pos: #2f7d4f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper:   #12171a;
+    --surface: #1a2126;
+    --sunk:    #151b1f;
+    --ink:     #eef3f5;
+    --ink-2:   #b7c4cb;
+    --muted:   #8b9aa2;
+    --rule:    #2c363c;
+    --rule-2:  #232c31;
+    --accent:  #5fb2c9;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --neg: #e0785a;
+    --pos: #62b183;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:   #12171a;
+  --surface: #1a2126;
+  --sunk:    #151b1f;
+  --ink:     #eef3f5;
+  --ink-2:   #b7c4cb;
+  --muted:   #8b9aa2;
+  --rule:    #2c363c;
+  --rule-2:  #232c31;
+  --accent:  #5fb2c9;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --neg: #e0785a;
+  --pos: #62b183;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 16px/1.62 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+.measure { max-width: 39rem; }
+
+/* ---- masthead ---------------------------------------------------------- */
+header.top { padding: 72px 0 0; }
+.kicker {
+  font: 500 11.5px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
+}
+h1 {
+  font-family: Newsreader, ui-serif, Georgia, serif;
+  font-weight: 500; font-size: clamp(2.5rem, 6vw, 4rem); line-height: 1.04;
+  letter-spacing: -.018em; margin: 18px 0 0; text-wrap: balance;
+}
+.standfirst {
+  font-family: Newsreader, ui-serif, Georgia, serif;
+  font-size: clamp(1.15rem, 2.4vw, 1.4rem); line-height: 1.5; color: var(--ink-2);
+  margin: 20px 0 0; max-width: 34rem; text-wrap: pretty;
+}
+.byline {
+  margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+  font: 400 12.5px/1.5 "IBM Plex Mono", ui-monospace, monospace; color: var(--muted);
+}
+
+/* ---- verdict ----------------------------------------------------------- */
+.verdict {
+  margin: 44px 0 0; padding: 28px 30px;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+  border-left: 4px solid var(--neg);
+}
+.verdict .lab {
+  font: 500 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--neg);
+}
+.verdict p {
+  font-family: Newsreader, ui-serif, Georgia, serif;
+  font-size: 1.34rem; line-height: 1.45; margin: 12px 0 0; text-wrap: pretty;
+}
+.verdict p + p { font-size: 1rem; font-family: "IBM Plex Sans", sans-serif; color: var(--ink-2); margin-top: 14px; }
+
+/* ---- headline figures -------------------------------------------------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 1px; margin: 40px 0 0; background: var(--rule); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.tile { background: var(--surface); padding: 20px 22px 18px; }
+.tile .n { font: 500 2.15rem/1 "IBM Plex Sans", sans-serif; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.tile .n.neg { color: var(--neg); }
+.tile .n.pos { color: var(--pos); }
+.tile .k { font: 400 12.5px/1.45 "IBM Plex Sans", sans-serif; color: var(--muted); margin-top: 7px; }
+
+/* ---- structure --------------------------------------------------------- */
+section { margin-top: 68px; }
+h2 {
+  font-family: Newsreader, ui-serif, Georgia, serif;
+  font-weight: 500; font-size: 1.95rem; line-height: 1.18; letter-spacing: -.012em;
+  margin: 0 0 6px; text-wrap: balance;
+}
+h2 .num {
+  font: 500 11.5px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: .12em; color: var(--accent); display: block; margin-bottom: 12px;
+}
+h3 { font: 600 .95rem/1.4 "IBM Plex Sans", sans-serif; letter-spacing: .01em; margin: 34px 0 8px; }
+p { margin: 14px 0 0; text-wrap: pretty; }
+p.lede { font-size: 1.06rem; color: var(--ink-2); }
+strong { font-weight: 600; }
+em.term { font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: .92em; color: var(--accent); }
+ul { margin: 14px 0 0; padding-left: 1.1rem; }
+li { margin: 7px 0; }
+a { color: var(--accent); }
+
+/* ---- figures ----------------------------------------------------------- */
+figure { margin: 30px 0 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; padding: 24px 26px 20px; }
+figcaption { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--rule-2); font-size: 13px; line-height: 1.55; color: var(--muted); }
+figcaption b { color: var(--ink-2); font-weight: 600; }
+.fig-h { font: 600 .95rem/1.35 "IBM Plex Sans", sans-serif; margin-bottom: 2px; }
+.fig-s { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 14px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: block; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.gl { stroke: var(--rule-2); stroke-width: 1; }
+.ax { stroke: var(--rule); stroke-width: 1; }
+.tk { font: 400 11px/1 "IBM Plex Mono", monospace; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.dl { font: 500 11.5px/1 "IBM Plex Sans", sans-serif; fill: var(--ink-2); }
+.bar-v { font: 500 11.5px/1 "IBM Plex Mono", monospace; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+.hit { fill: transparent; cursor: crosshair; }
+
+/* ---- tables ------------------------------------------------------------ */
+.scroll { overflow-x: auto; margin-top: 22px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--rule-2); }
+th { font: 500 11px/1.3 "IBM Plex Mono", monospace; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); border-bottom-color: var(--rule); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", monospace; }
+td code { font: 400 12.5px "IBM Plex Mono", monospace; }
+tr.win td { color: var(--pos); }
+
+/* ---- callouts ---------------------------------------------------------- */
+.note { margin-top: 26px; padding: 18px 20px; background: var(--sunk); border-radius: 3px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.note b { color: var(--ink); }
+
+/* ---- tooltip ----------------------------------------------------------- */
+#tip {
+  position: fixed; z-index: 20; pointer-events: none; opacity: 0;
+  transition: opacity .1s ease; background: var(--ink); color: var(--paper);
+  padding: 7px 10px; border-radius: 3px; font: 400 12px/1.45 "IBM Plex Mono", monospace;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--muted); }
+</style>
+
+<div id="tip"></div>
+<div class="wrap">
+
+<header class="top">
+  <div class="kicker">Cali · research note</div>
+  <h1>The compression ceiling</h1>
+  <p class="standfirst">Can 2,280 stocks be represented by a small set of industry-ETF bets? The data says no — and the machinery already in the product does the job roughly twice as well.</p>
+  <div class="byline">
+    <span>2026-08-28</span>
+    <span>756 sessions</span>
+    <span>2,280 stocks · 75 candidate ETFs</span>
+    <span>npm run labs:etf-basis</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <div class="lab">Recommendation</div>
+  <p>Do not change Cali. An ETF basis represents 28% of the universe; the correlation grouping already in the product covers 48–59% at ten times the granularity.</p>
+  <p>The compression that <em>does</em> exist is real and worth knowing about — but it lives in about ten rate-sensitive and commodity-linked groups, which is roughly what ETF River already displays.</p>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="n">0.19</div><div class="k">Median best-match partial R², against a null of 0.010</div></div>
+  <div class="tile"><div class="n neg">28.3%</div><div class="k">Of stocks represented at R² ≥ 0.3, the lenient bar</div></div>
+  <div class="tile"><div class="n">10</div><div class="k">ETFs deliver 78% of what all 45 achieve</div></div>
+  <div class="tile"><div class="n pos">12<span style="color:var(--muted);font-size:1.3rem">/13</span></div><div class="k">Known-redundant control pairs the method caught</div></div>
+</div>
+
+<section>
+  <h2><span class="num">01 — Method</span>Removing the market is the whole ballgame</h2>
+  <p class="lede measure">Every series is residualised against SPY before anything is compared. Without that step the study cannot say anything, because two U.S. equity ETFs are correlated for the trivial reason that both are U.S. equities.</p>
+  <p class="measure">The size of the effect settles it. Across 2,775 candidate pairs, median |ρ| falls from <strong>0.43 raw to 0.15 on market residuals</strong>. Similarity measured on raw returns would have found "redundancy" everywhere and produced a confidently wrong answer.</p>
+
+  <figure>
+    <div class="fig-h">Pairwise |ρ| between candidate ETFs</div>
+    <div class="fig-s">2,775 pairs, 756 sessions. Median and 90th percentile.</div>
+    <div class="legend">
+      <span><i style="background:var(--s2)"></i>Raw returns</span>
+      <span><i style="background:var(--s1)"></i>After removing SPY</span>
+    </div>
+    <svg id="c-resid" viewBox="0 0 720 150" role="img" aria-label="Median pairwise correlation falls from 0.43 raw to 0.15 after removing the market"></svg>
+    <figcaption><b>Why it matters.</b> A method that skipped this step would merge unrelated industries and report a far smaller "distinct bet" count — the compression would be an artefact of market beta, not of industry structure.</figcaption>
+  </figure>
+
+  <h3>The candidate library carries its own falsifier</h3>
+  <p class="measure">75 candidates include <strong>13 pairs that are near-certainly the same bet in different wrappers</strong> — SMH/SOXX, XBI/IBB, ITA/XAR, GDX/GDXJ, RWR/VNQ and so on. Without a known answer in the data there is no way to tell a working redundancy method from a merely plausible one. The method merged 12 of the 13.</p>
+  <p class="measure">The miss is informative rather than a failure. <em class="term">XPH</em> (equal-weight, generics-heavy pharma) merged into <em class="term">XBI</em>; <em class="term">PPH</em> (cap-weighted big pharma) stayed on its own. Big pharma really is a different bet from biotech. Equal-weight pharma is not.</p>
+</section>
+
+<section>
+  <h2><span class="num">02 — Redundancy</span>75 candidates collapse to 45 distinct bets</h2>
+  <p class="measure">Complete-linkage clustering on residual |ρ| ≥ 0.70 — complete, not single, or semiconductors chain to software to cloud to fintech through a run of merely adjacent pairs and the whole thing becomes one bet.</p>
+  <p class="measure">25 of the 45 survived as singletons, so the library was not simply padded. The merges the method found that I had <em>not</em> predicted are the interesting ones:</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Kept</th><th>Absorbed</th><th>What it says</th></tr></thead>
+      <tbody>
+        <tr><td><code>IGV</code></td><td><code>XSW SKYY WCLD</code></td><td>Software, cloud and SaaS are one bet</td></tr>
+        <tr><td><code>XBI</code></td><td><code>IBB XPH</code></td><td>Biotech absorbs equal-weight pharma</td></tr>
+        <tr><td><code>XOP</code></td><td><code>XES OIH</code></td><td>E&amp;P and oil services do not separate</td></tr>
+        <tr><td><code>TAN</code></td><td><code>ICLN PBW</code></td><td>Solar <em>is</em> the clean-energy trade</td></tr>
+        <tr><td><code>URA</code></td><td><code>URNM NLR</code></td><td>Uranium and nuclear are one bet</td></tr>
+        <tr><td><code>GDX</code></td><td><code>GDXJ SIL</code></td><td>Silver miners are gold miners</td></tr>
+        <tr><td><code>RWR</code></td><td><code>VNQ REZ INDS</code></td><td>REIT subsectors do not separate</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">03 — The ceiling</span>The curve elbows immediately, then stops</h2>
+  <p class="lede measure">This is the result the study exists to produce. Coverage rises steeply for the first ten ETFs and then flattens against a hard ceiling that more ETFs cannot lift.</p>
+
+  <figure>
+    <div class="fig-h">Share of the universe represented, as the basis grows</div>
+    <div class="fig-s">Greedy forward selection: each step adds the ETF that newly represents the most still-unrepresented stocks.</div>
+    <div class="legend">
+      <span><i style="background:var(--s1)"></i>R² ≥ 0.3</span>
+      <span><i style="background:var(--s2)"></i>R² ≥ 0.4</span>
+      <span><i style="background:var(--s3)"></i>R² ≥ 0.5</span>
+    </div>
+    <svg id="c-curve" viewBox="0 0 720 330" role="img" aria-label="Compression curve: coverage flattens after about ten ETFs at a ceiling of 28 percent"></svg>
+    <figcaption><b>The hoped-for 30–60 bets is the flat part of the curve.</b> Going from 30 ETFs to all 45 adds <b>0.2 percentage points</b>. There is nothing there to find.</figcaption>
+  </figure>
+
+  <p class="measure">Read against the fit distribution, the ceiling is not a quirk of the greedy selection — it is where the stocks simply run out. Most of the universe has no good match at any basis size.</p>
+
+  <figure>
+    <div class="fig-h">Best-match partial R², all 2,280 stocks</div>
+    <div class="fig-s">How much of a stock's non-market variance its closest ETF explains.</div>
+    <svg id="c-hist" viewBox="0 0 720 250" role="img" aria-label="Distribution of best-match partial R squared, concentrated below 0.3"></svg>
+    <figcaption><b>The null is the thing to look at.</b> The same search against an <em>arbitrary</em> basis member returns a median of 0.010 — so a median best match of 0.19 is genuinely 19× the noise floor. The signal is real. It is simply not large enough to represent a stock.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2><span class="num">04 — Where it works</span>Compression finds rates and commodities, not products</h2>
+  <p class="lede measure">Almost all of the coverage comes from groups where the company is a proxy for a rate or a commodity. A regional bank is an interest-rate position with a logo; a gold miner is levered gold.</p>
+
+  <figure>
+    <div class="fig-h">Stocks absorbed by each ETF, at R² ≥ 0.3</div>
+    <div class="fig-s">Top 12 of the 45-member basis.</div>
+    <div class="legend">
+      <span><i style="background:var(--s1)"></i>Rate- or commodity-linked</span>
+      <span><i style="background:var(--s2)"></i>Product-driven industry</span>
+    </div>
+    <svg id="c-abs" viewBox="0 0 720 400" role="img" aria-label="KRE absorbs 125 stocks, far more than any other ETF; product-driven industries absorb few"></svg>
+    <figcaption><b>KRE alone accounts for a fifth of everything the basis represents.</b> Take out banks, REITs, energy, homebuilders, insurance, utilities and gold miners and the compression story largely disappears.</figcaption>
+  </figure>
+
+  <div class="note">
+    <b>The motivating example is the case that fails.</b> "Fifteen highly correlated semiconductor stocks" was the premise for this whole investigation. <code>SMH</code> is the best match for 93 stocks — but only <b>23</b> clear R² ≥ 0.3, and their median R² is <b>0.17</b>. Semiconductor stocks are not one bet on this data. AMD, Broadcom and Micron have genuinely different businesses, and the ETF captures about a sixth of what moves them once the market is removed.
+  </div>
+
+  <h3>Strongest and weakest mappings</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Stock</th><th>Best ETF</th><th class="n">R²</th><th>Reading</th></tr></thead>
+      <tbody>
+        <tr><td><code>AEM</code></td><td><code>GDX</code></td><td class="n">0.88</td><td>Agnico Eagle is levered gold</td></tr>
+        <tr><td><code>FNB</code></td><td><code>KRE</code></td><td class="n">0.85</td><td>A regional bank is the rate curve</td></tr>
+        <tr><td><code>PHM</code></td><td><code>XHB</code></td><td class="n">0.80</td><td>PulteGroup is the housing trade</td></tr>
+        <tr><td><code>IDCC</code></td><td><code>XTL</code></td><td class="n">0.02</td><td>Patent licensing filed under Telecom</td></tr>
+        <tr><td><code>CORT</code></td><td><code>XHS</code></td><td class="n">0.01</td><td>Single-product pharma, no group</td></tr>
+        <tr><td><code>PSKY</code></td><td><code>KIE</code></td><td class="n">0.01</td><td>Matched Insurance at random</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">05 — Momentum</span>Inside the 28%, the hierarchy genuinely works</h2>
+  <p class="lede measure">This is the part of the result that is positive, and it is worth stating precisely because it is also the part most easily over-read.</p>
+
+  <figure>
+    <div class="fig-h">Where the top 100 momentum stocks sit in their ETF's ranking</div>
+    <div class="fig-s">The 646 represented stocks, ranked by 12-1 momentum. ETF quintiles by the same measure.</div>
+    <svg id="c-mom" viewBox="0 0 720 210" role="img" aria-label="64 of the top 100 stocks sit in a top-quintile ETF against a chance rate of 20"></svg>
+    <figcaption>Spearman(stock 12-1, its ETF's 12-1 rank) = <b>0.60</b>. Stock momentum regressed on its group's: <b>R² 0.36</b>, β 1.55 — a stock moves about 1.5× its group, and roughly a third of its momentum <em>is</em> its group's. Only 8 of the top 100 come from a below-median group.</figcaption>
+  </figure>
+
+  <p class="measure">So an ETF-first screen would successfully find where most leaders are — <strong>within the 28% of the universe it can see at all</strong>. Applied to the whole universe it is blind to the other 72%, which includes most of technology and most of health care.</p>
+</section>
+
+<section>
+  <h2><span class="num">06 — Baseline</span>The product already does this, better</h2>
+  <p class="lede measure">The change I made to the proposed plan, and the one that decides the answer: the baseline is not "no grouping". Cali already clusters its entire universe by correlation.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th></th><th class="n">ETF basis</th><th class="n">Existing grouping (ρ≥0.65)</th><th class="n">(ρ≥0.60)</th></tr></thead>
+      <tbody>
+        <tr><td>Groups</td><td class="n">45</td><td class="n">326</td><td class="n">386</td></tr>
+        <tr class="win"><td>Names grouped</td><td class="n">646 · 28.3%</td><td class="n">1,103 · 48.4%</td><td class="n">1,351 · 59.3%</td></tr>
+        <tr><td>Largest group</td><td class="n">125</td><td class="n">23</td><td class="n">40</td></tr>
+        <tr><td>Derived from</td><td class="n">45 external proxies</td><td class="n" colspan="2">the universe's own returns</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="measure">The correlation grouping covers roughly twice as many names at an order of magnitude finer granularity, and it is derived from the stocks themselves rather than from an editorial list of ETFs somebody has to maintain. An ETF layer would replace a finer instrument with a coarser one.</p>
+</section>
+
+<section>
+  <h2><span class="num">07 — Next</span>What I would test, and what I would not</h2>
+  <ul class="measure">
+    <li><strong>Attack the real complaint directly.</strong> "The Top 100 is full of the same trade" is measurable today: how many of the top 100 share a correlation group? If that number is small the problem is smaller than assumed; if large, the fix is <em>presenting</em> the existing groups better, not adding an ETF layer.</li>
+    <li><strong>Split the regime.</strong> Re-run on 2023–24 against 2025–26. If KRE's 125-stock absorption halves, the compression is a rate-cycle artefact rather than a structural fact — 756 sessions covers one cycle.</li>
+    <li><strong>Do groups predict?</strong> Whether last month's group momentum beats a member's own at predicting next month's return is the only test that would justify ranking groups before stocks. This study does not answer it, and nothing here should be read as if it did.</li>
+  </ul>
+  <div class="note">
+    <b>What is worth keeping.</b> A dozen ETFs summarise the rate-sensitive and commodity-linked block well. That is a real finding, and the honest framing is not "ETFs replace stocks" but "a dozen ETFs are a good <em>context</em> panel for the third of the universe that is a macro proxy" — which is close to what ETF River already shows.
+  </div>
+</section>
+
+<footer>
+  Reproduce with <code>npm run labs:etf-basis</code>. Full write-up in <code>docs/etf-basis-research.md</code>. Study window 2023-08-23 → 2026-08-28, split- and dividend-adjusted prices, market proxy SPY.
+</footer>
+</div>
+
+<script>
+const D = {"asOf":"2026-08-28","sessions":756,"stocks":2280,"candidates":75,"basisN":45,"controls":{"total":13,"caught":12},"pairCorr":{"rawP50":0.4343443607777664,"rawP90":0.640338602100278,"resP50":0.1472956097150998,"resP90":0.39322926837371774},"fitQ":{"p10":0.06447381364830307,"p25":0.10858721841256115,"p50":0.18625065583222675,"p75":0.3227887616816809,"p90":0.543936442060067},"nullQ":{"p50":0.010392194348551301,"p90":0.025665220152181752},"hist":[{"x":0,"best":140,"nul":2279},{"x":0.05,"best":367,"nul":1},{"x":0.1,"best":368,"nul":0},{"x":0.15,"best":365,"nul":0},{"x":0.2,"best":220,"nul":0},{"x":0.25,"best":174,"nul":0},{"x":0.3,"best":143,"nul":0},{"x":0.35,"best":99,"nul":0},{"x":0.4,"best":73,"nul":0},{"x":0.45,"best":44,"nul":0},{"x":0.5,"best":64,"nul":0},{"x":0.55,"best":44,"nul":0},{"x":0.6,"best":36,"nul":0},{"x":0.65,"best":50,"nul":0},{"x":0.7,"best":48,"nul":0},{"x":0.75,"best":33,"nul":0},{"x":0.8,"best":11,"nul":0},{"x":0.85,"best":1,"nul":0},{"x":0.9,"best":0,"nul":0},{"x":0.95,"best":0,"nul":0}],"curve":{"0.3":[{"n":1,"share":0.056578947368421055,"add":"KRE"},{"n":2,"share":0.09210526315789473,"add":"RWR"},{"n":3,"share":0.1206140350877193,"add":"XOP"},{"n":4,"share":0.14342105263157895,"add":"XHB"},{"n":5,"share":0.1631578947368421,"add":"KIE"},{"n":6,"share":0.18026315789473685,"add":"GDX"},{"n":7,"share":0.19298245614035087,"add":"XLU"},{"n":8,"share":0.20307017543859648,"add":"SMH"},{"n":9,"share":0.21271929824561403,"add":"KCE"},{"n":10,"share":0.2206140350877193,"add":"PAVE"},{"n":11,"share":0.22719298245614036,"add":"IGV"},{"n":12,"share":0.23201754385964912,"add":"BLOK"},{"n":13,"share":0.23640350877192984,"add":"IYT"},{"n":14,"share":0.24078947368421053,"add":"SLX"},{"n":15,"share":0.24473684210526317,"add":"ARKG"},{"n":16,"share":0.24868421052631579,"add":"PPH"},{"n":17,"share":0.25263157894736843,"add":"XRT"},{"n":18,"share":0.256140350877193,"add":"JETS"},{"n":19,"share":0.25921052631578945,"add":"ITA"},{"n":20,"share":0.26228070175438595,"add":"TAN"},{"n":21,"share":0.2649122807017544,"add":"AMLP"},{"n":22,"share":0.2675438596491228,"add":"IHI"},{"n":23,"share":0.26973684210526316,"add":"CIBR"},{"n":24,"share":0.2719298245614035,"add":"COPX"},{"n":25,"share":0.2741228070175439,"add":"URA"},{"n":26,"share":0.27587719298245617,"add":"MOO"},{"n":27,"share":0.2776315789473684,"add":"PBJ"},{"n":28,"share":0.2793859649122807,"add":"SRVR"},{"n":29,"share":0.2802631578947368,"add":"LIT"},{"n":30,"share":0.28114035087719297,"add":"XBI"},{"n":31,"share":0.28157894736842104,"add":"FINX"},{"n":32,"share":0.2820175438596491,"add":"IEDI"},{"n":33,"share":0.2824561403508772,"add":"PEJ"},{"n":34,"share":0.28289473684210525,"add":"XHS"},{"n":35,"share":0.2833333333333333,"add":"XME"}],"0.4":[{"n":1,"share":0.05,"add":"KRE"},{"n":2,"share":0.07149122807017544,"add":"RWR"},{"n":3,"share":0.09166666666666666,"add":"XOP"},{"n":4,"share":0.10657894736842105,"add":"GDX"},{"n":5,"share":0.11973684210526316,"add":"XHB"},{"n":6,"share":0.1324561403508772,"add":"XLU"},{"n":7,"share":0.14385964912280702,"add":"KIE"},{"n":8,"share":0.14780701754385964,"add":"BLOK"},{"n":9,"share":0.1513157894736842,"add":"COPX"},{"n":10,"share":0.15482456140350878,"add":"KCE"},{"n":11,"share":0.15789473684210525,"add":"JETS"},{"n":12,"share":0.16096491228070176,"add":"SMH"},{"n":13,"share":0.1631578947368421,"add":"TAN"},{"n":14,"share":0.1649122807017544,"add":"CIBR"},{"n":15,"share":0.16666666666666666,"add":"IHI"},{"n":16,"share":0.16842105263157894,"add":"PPH"},{"n":17,"share":0.17017543859649123,"add":"URA"},{"n":18,"share":0.17149122807017544,"add":"ARKG"},{"n":19,"share":0.17280701754385966,"add":"IGV"},{"n":20,"share":0.1736842105263158,"add":"LIT"},{"n":21,"share":0.17456140350877192,"add":"SLX"},{"n":22,"share":0.17543859649122806,"add":"SRVR"},{"n":23,"share":0.17587719298245613,"add":"ITA"},{"n":24,"share":0.1763157894736842,"add":"IYT"},{"n":25,"share":0.17675438596491228,"add":"MOO"},{"n":26,"share":0.17719298245614035,"add":"XRT"}],"0.5":[{"n":1,"share":0.04780701754385965,"add":"KRE"},{"n":2,"share":0.06096491228070176,"add":"GDX"},{"n":3,"share":0.07324561403508772,"add":"RWR"},{"n":4,"share":0.08552631578947369,"add":"XOP"},{"n":5,"share":0.09605263157894736,"add":"XLU"},{"n":6,"share":0.10482456140350878,"add":"XHB"},{"n":7,"share":0.11052631578947368,"add":"KIE"},{"n":8,"share":0.11403508771929824,"add":"COPX"},{"n":9,"share":0.1162280701754386,"add":"BLOK"},{"n":10,"share":0.11842105263157894,"add":"JETS"},{"n":11,"share":0.12017543859649123,"add":"URA"},{"n":12,"share":0.12149122807017544,"add":"SMH"},{"n":13,"share":0.12236842105263158,"add":"IGV"},{"n":14,"share":0.12324561403508771,"add":"IHI"},{"n":15,"share":0.12412280701754386,"add":"TAN"},{"n":16,"share":0.12456140350877193,"add":"AMLP"},{"n":17,"share":0.125,"add":"CIBR"},{"n":18,"share":0.12543859649122807,"add":"ITA"},{"n":19,"share":0.12587719298245614,"add":"PPH"}]},"absorbed":[["KRE",125],["RWR",67],["XOP",63],["XHB",52],["KIE",46],["XLU",40],["GDX",38],["KCE",25],["SMH",23],["PAVE",18],["IGV",13],["BLOK",11]],"momentum":{"topQuintileShare":0.64,"spearman":0.5957257949806678,"groupR2":0.361294609776329,"strongInWeakGroup":8},"thresholds":[{"t":0.2,"n":1040},{"t":0.3,"n":646},{"t":0.4,"n":404},{"t":0.5,"n":287},{"t":0.6,"n":179}],"basis":[{"k":"SMH","m":["SOXX","XSD"],"l":"Semiconductors"},{"k":"IGV","m":["XSW","SKYY","WCLD"],"l":"Software"},{"k":"CIBR","m":["HACK"],"l":"Cybersecurity"},{"k":"FINX","m":["IPAY"],"l":"Fintech"},{"k":"BOTZ","m":[],"l":"Robotics & AI"},{"k":"XTL","m":[],"l":"Telecom"},{"k":"ESPO","m":[],"l":"Video gaming & esports"},{"k":"KRE","m":["KBE"],"l":"Regional banks"},{"k":"KCE","m":["IAI"],"l":"Capital markets"},{"k":"KIE","m":["IAK"],"l":"Insurance"},{"k":"XBI","m":["IBB","XPH"],"l":"Biotech, equal weight"},{"k":"PPH","m":[],"l":"Pharmaceuticals (alt wrapper)"},{"k":"IHI","m":["XHE"],"l":"Medical devices"},{"k":"XHS","m":["IHF"],"l":"Health care services"},{"k":"ITA","m":["XAR"],"l":"Aerospace & defence"},{"k":"IYT","m":["XTN"],"l":"Transportation"},{"k":"JETS","m":[],"l":"Airlines"},{"k":"PAVE","m":["PKB"],"l":"Infrastructure development"},{"k":"XHB","m":["ITB"],"l":"Homebuilders & supply"},{"k":"XRT","m":[],"l":"Retail"},{"k":"PEJ","m":[],"l":"Leisure & entertainment"},{"k":"PBJ","m":[],"l":"Food & beverage"},{"k":"BJK","m":[],"l":"Gaming & casinos"},{"k":"IEDI","m":[],"l":"Consumer staples distribution"},{"k":"XOP","m":["XES","OIH"],"l":"Oil & gas E&P"},{"k":"AMLP","m":[],"l":"Midstream MLPs"},{"k":"TAN","m":["ICLN","PBW"],"l":"Solar"},{"k":"FAN","m":[],"l":"Wind"},{"k":"URA","m":["URNM","NLR"],"l":"Uranium"},{"k":"XLU","m":[],"l":"Utilities"},{"k":"GDX","m":["GDXJ","SIL"],"l":"Gold miners"},{"k":"COPX","m":[],"l":"Copper miners"},{"k":"LIT","m":["REMX"],"l":"Lithium & battery"},{"k":"XME","m":[],"l":"Metals & mining, broad"},{"k":"SLX","m":[],"l":"Steel"},{"k":"MOO","m":[],"l":"Agribusiness"},{"k":"WOOD","m":[],"l":"Timber & forestry"},{"k":"RWR","m":["VNQ","REZ","INDS"],"l":"REITs, broad"},{"k":"SRVR","m":[],"l":"Data centre & infrastructure REITs"},{"k":"IPO","m":[],"l":"Recent IPOs"},{"k":"ARKG","m":[],"l":"Genomics"},{"k":"MJ","m":[],"l":"Cannabis"},{"k":"BLOK","m":[],"l":"Blockchain"},{"k":"SEA","m":[],"l":"Shipping"},{"k":"COWZ","m":[],"l":"Cash-cow industrials"}]};
+const NS = 'http://www.w3.org/2000/svg';
+const tip = document.getElementById('tip');
+const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const show = (e, html) => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = Math.min(e.clientX + 14, innerWidth - 190) + 'px'; tip.style.top = (e.clientY - 34) + 'px'; };
+const hide = () => { tip.style.opacity = 0; };
+const hover = (node, html) => { node.addEventListener('mousemove', (e) => show(e, html)); node.addEventListener('mouseleave', hide); };
+
+/* ---- 1. raw vs residual correlation ------------------------------------ */
+(() => {
+  const s = document.getElementById('c-resid');
+  const X0 = 96, X1 = 660, rows = [
+    { k: 'Median', raw: D.pairCorr.rawP50, res: D.pairCorr.resP50, y: 40 },
+    { k: '90th pct', raw: D.pairCorr.rawP90, res: D.pairCorr.resP90, y: 96 },
+  ];
+  const x = (v) => X0 + v * (X1 - X0);
+  for (const t of [0, 0.2, 0.4, 0.6]) {
+    s.append(el('line', { class: 'gl', x1: x(t), y1: 18, x2: x(t), y2: 128 }));
+    const l = el('text', { class: 'tk', x: x(t), y: 144, 'text-anchor': 'middle' }); l.textContent = t.toFixed(1); s.append(l);
+  }
+  for (const r of rows) {
+    const lab = el('text', { class: 'dl', x: X0 - 12, y: r.y + 4, 'text-anchor': 'end' }); lab.textContent = r.k; s.append(lab);
+    const bars = [['raw', r.raw, 'var(--s2)', -9], ['res', r.res, 'var(--s1)', 5]];
+    for (const [key, v, col, dy] of bars) {
+      const b = el('rect', { x: X0, y: r.y + dy - 5, width: Math.max(2, x(v) - X0), height: 11, rx: 4, fill: col });
+      s.append(b);
+      hover(b, `${r.k} · ${key === 'raw' ? 'raw' : 'residual'} |ρ| <b>${v.toFixed(2)}</b>`);
+      const t = el('text', { class: 'bar-v', x: x(v) + 8, y: r.y + dy + 4 }); t.textContent = v.toFixed(2); s.append(t);
+    }
+  }
+})();
+
+/* ---- 2. compression curve ---------------------------------------------- */
+(() => {
+  const s = document.getElementById('c-curve');
+  const X0 = 52, X1 = 636, Y0 = 22, Y1 = 268, maxN = 45, maxS = 0.32;
+  const x = (n) => X0 + (n / maxN) * (X1 - X0);
+  const y = (v) => Y1 - (v / maxS) * (Y1 - Y0);
+  for (const g of [0, 0.1, 0.2, 0.3]) {
+    s.append(el('line', { class: 'gl', x1: X0, y1: y(g), x2: X1, y2: y(g) }));
+    const t = el('text', { class: 'tk', x: X0 - 10, y: y(g) + 4, 'text-anchor': 'end' }); t.textContent = (g * 100).toFixed(0) + '%'; s.append(t);
+  }
+  s.append(el('line', { class: 'ax', x1: X0, y1: Y1, x2: X1, y2: Y1 }));
+  for (const n of [1, 10, 20, 30, 45]) {
+    const t = el('text', { class: 'tk', x: x(n), y: Y1 + 20, 'text-anchor': 'middle' }); t.textContent = n; s.append(t);
+  }
+  const xl = el('text', { class: 'tk', x: (X0 + X1) / 2, y: Y1 + 44, 'text-anchor': 'middle' }); xl.textContent = 'ETFs in the basis'; s.append(xl);
+
+  const series = [['0.3', 'var(--s1)'], ['0.4', 'var(--s2)'], ['0.5', 'var(--s3)']];
+  for (const [k, col] of series) {
+    const pts = D.curve[k];
+    let d = `M${x(0)},${y(0)}`;
+    for (const p of pts) d += `L${x(p.n)},${y(p.share)}`;
+    // Hold the ceiling to the axis end so the flatline is visible as a flatline.
+    d += `L${x(maxN)},${y(pts[pts.length - 1].share)}`;
+    s.append(el('path', { d, fill: 'none', stroke: col, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    const last = pts[pts.length - 1];
+    const lab = el('text', { class: 'dl', x: x(maxN) + 8, y: y(last.share) + 4, fill: col });
+    lab.textContent = (last.share * 100).toFixed(1) + '%'; s.append(lab);
+    for (const p of pts) {
+      const c = el('circle', { cx: x(p.n), cy: y(p.share), r: 9, class: 'hit' });
+      hover(c, `${p.n} ETFs · <b>${(p.share * 100).toFixed(1)}%</b> covered<br>added ${p.add} · R²≥${k}`);
+      s.append(c);
+    }
+  }
+  // The elbow, marked because it is the finding.
+  s.append(el('line', { x1: x(10), y1: Y0, x2: x(10), y2: Y1, stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+  const e1 = el('text', { class: 'dl', x: x(10) + 8, y: Y0 + 12, fill: 'var(--muted)' });
+  e1.textContent = '10 ETFs → 78% of the ceiling'; s.append(e1);
+})();
+
+/* ---- 3. fit distribution ------------------------------------------------ */
+(() => {
+  const s = document.getElementById('c-hist');
+  const X0 = 52, X1 = 660, Y0 = 20, Y1 = 190;
+  // Headroom above the tallest bar, or the top of the distribution collides
+  // with the annotations that explain it.
+  const maxC = Math.max(...D.hist.map((h) => h.best)) * 1.18;
+  const bw = (X1 - X0) / D.hist.length;
+  const y = (v) => Y1 - (v / maxC) * (Y1 - Y0);
+  for (const g of [0, 100, 200, 300]) {
+    s.append(el('line', { class: 'gl', x1: X0, y1: y(g), x2: X1, y2: y(g) }));
+    const t = el('text', { class: 'tk', x: X0 - 10, y: y(g) + 4, 'text-anchor': 'end' }); t.textContent = g; s.append(t);
+  }
+  D.hist.forEach((h, i) => {
+    const bx = X0 + i * bw;
+    const r = el('rect', { x: bx + 1, y: y(h.best), width: bw - 2, height: Y1 - y(h.best), rx: 3, fill: h.x >= 0.3 ? 'var(--s1)' : 'var(--muted)' });
+    s.append(r);
+    hover(r, `R² ${h.x.toFixed(2)}–${(h.x + 0.05).toFixed(2)} · <b>${h.best}</b> stocks`);
+  });
+  s.append(el('line', { class: 'ax', x1: X0, y1: Y1, x2: X1, y2: Y1 }));
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    const tx = X0 + t * (X1 - X0);
+    const l = el('text', { class: 'tk', x: tx, y: Y1 + 20, 'text-anchor': 'middle' }); l.textContent = t.toFixed(2); s.append(l);
+  }
+  const xl = el('text', { class: 'tk', x: (X0 + X1) / 2, y: Y1 + 42, 'text-anchor': 'middle' }); xl.textContent = 'best-match partial R²'; s.append(xl);
+  // The 0.3 bar is where "represented" starts; everything left of it is grey.
+  const cut = X0 + 0.3 * (X1 - X0);
+  s.append(el('line', { x1: cut, y1: Y0 - 6, x2: cut, y2: Y1, stroke: 'var(--ink-2)', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+  const c1 = el('text', { class: 'dl', x: cut + 8, y: Y0 + 4 }); c1.textContent = '28.3% of stocks sit right of here →'; s.append(c1);
+  const c2 = el('text', { class: 'dl', x: cut - 8, y: Y0 + 4, 'text-anchor': 'end', fill: 'var(--muted)' });
+  c2.textContent = '← 71.7% below the bar'; s.append(c2);
+})();
+
+/* ---- 4. absorbed ------------------------------------------------------- */
+(() => {
+  const s = document.getElementById('c-abs');
+  const MACRO = new Set(['KRE', 'RWR', 'XOP', 'XHB', 'KIE', 'XLU', 'GDX', 'KCE']);
+  const X0 = 74, X1 = 630, rowH = 28;
+  const max = D.absorbed[0][1];
+  const x = (v) => X0 + (v / max) * (X1 - X0);
+  D.absorbed.forEach(([sym, n], i) => {
+    const yy = 16 + i * rowH;
+    const lab = el('text', { class: 'dl', x: X0 - 12, y: yy + 12, 'text-anchor': 'end' }); lab.textContent = sym; s.append(lab);
+    const col = MACRO.has(sym) ? 'var(--s1)' : 'var(--s2)';
+    const r = el('rect', { x: X0, y: yy + 2, width: Math.max(2, x(n) - X0), height: 15, rx: 4, fill: col });
+    s.append(r);
+    hover(r, `${sym} · <b>${n}</b> stocks at R² ≥ 0.3`);
+    const v = el('text', { class: 'bar-v', x: x(n) + 8, y: yy + 14 }); v.textContent = n; s.append(v);
+  });
+})();
+
+/* ---- 5. momentum ------------------------------------------------------- */
+(() => {
+  const s = document.getElementById('c-mom');
+  const X0 = 60, X1 = 640, Y = 60, H = 46;
+  const actual = Math.round(D.momentum.topQuintileShare * 100);
+  const rows = [
+    { k: 'Observed', v: actual, col: 'var(--s1)', note: 'in a top-quintile ETF' },
+    { k: 'Chance', v: 20, col: 'var(--muted)', note: 'if the group carried no information' },
+  ];
+  rows.forEach((r, i) => {
+    const yy = Y + i * (H + 16);
+    const lab = el('text', { class: 'dl', x: X0 - 12, y: yy + 22, 'text-anchor': 'end' }); lab.textContent = r.k; s.append(lab);
+    const w = (r.v / 100) * (X1 - X0);
+    const bar = el('rect', { x: X0, y: yy, width: w, height: 30, rx: 4, fill: r.col });
+    s.append(bar);
+    hover(bar, `${r.k}: <b>${r.v}</b> of the top 100`);
+    const v = el('text', { class: 'bar-v', x: X0 + w + 10, y: yy + 20 }); v.textContent = r.v + ' of 100'; s.append(v);
+    const nt = el('text', { class: 'tk', x: X0 + w + 78, y: yy + 20 }); nt.textContent = r.note; s.append(nt);
+  });
+  const t = el('text', { class: 'dl', x: X0 - 12, y: 28, 'text-anchor': 'end', fill: 'var(--muted)' });
+  t.textContent = ''; s.append(t);
+})();
+</script>

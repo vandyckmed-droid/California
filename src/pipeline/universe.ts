@@ -1,4 +1,5 @@
-import { EXCHANGES, MIN_MARKET_CAP, MIN_PRICE } from '../config.ts';
+import { CLEAN_EXCLUDE_ADR, EXCHANGES, MIN_MARKET_CAP, MIN_PRICE } from '../config.ts';
+import { securityTypeReason } from './cleanup.ts';
 import type { FmpClient } from '../fmp/client.ts';
 import type { ScreenerRow } from '../fmp/types.ts';
 
@@ -11,6 +12,8 @@ export type ExclusionReason =
   | 'namePattern'
   | 'partnership'
   | 'shellCompany'
+  | 'securityType'
+  | 'notActivelyTrading'
   | 'missingMetadata'
   | 'duplicateSymbol';
 
@@ -113,6 +116,11 @@ export function classify(row: ScreenerRow): ExclusionReason | null {
   if (hasNonCommonName(row.companyName ?? '')) return 'namePattern';
   if (isPartnership(row.companyName ?? '')) return 'partnership';
   if (row.industry === 'Shell Companies') return 'shellCompany';
+  // The screener is *asked* for isEtf=false&isFund=false; this checks the flags
+  // the vendor actually returned on the row, which is not the same promise, and
+  // adds the wrappers those flags do not cover (ETNs, SPACs, royalty trusts).
+  const type = securityTypeReason(row, CLEAN_EXCLUDE_ADR);
+  if (type === 'securityType' || type === 'notActivelyTrading') return type;
   if (row.marketCap == null || row.price == null || !row.exchangeShortName) return 'missingMetadata';
   return null;
 }
@@ -128,6 +136,8 @@ export async function buildUniverse(client: FmpClient): Promise<UniverseResult> 
     namePattern: 0,
     partnership: 0,
     shellCompany: 0,
+    securityType: 0,
+    notActivelyTrading: 0,
     missingMetadata: 0,
     duplicateSymbol: 0,
   };
