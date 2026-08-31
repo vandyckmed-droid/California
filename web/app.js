@@ -259,6 +259,12 @@ export function rerender({ keepScroll = false } = {}) {
   // mid-scroll. Restore again once the content is in the DOM.
   let painted;
   if (route === 'watchlist') painted = renderWatchlist(app);
+  // Labs is one branch and one dynamic import, so core knows a single name and
+  // downloads none of the experiment unless someone asks for it. Everything
+  // under `labs/` is the experiment's own business.
+  else if (route === 'labs' || route.startsWith('labs/')) {
+    painted = import('./views/labs/index.js').then((m) => m.renderLabs(app, route.slice(5)));
+  }
   else if (route && route !== '') painted = renderTicker(app, snapshot, decodeURIComponent(route));
   else painted = renderList(app);
   restore();

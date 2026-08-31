@@ -295,3 +295,63 @@ td .floored { color: var(--faint); font-size: 10.5px; margin-left: 4px; }
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
   color: var(--neg); font: inherit; font-size: 13px; cursor: pointer;
 }
+
+/* ---------------------------------------------------------------------------
+   Labs. Every rule here is scoped to a lab screen, so deleting this block and
+   web/views/labs/ removes the experiment without touching a product style.
+   --------------------------------------------------------------------------- */
+.lab { padding-bottom: 8px; }
+.lab-note { margin: 6px 14px 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.lab-note b { color: var(--text); }
+
+.river-wrap {
+  position: relative; margin: 0 12px; padding-left: 34px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+}
+.river { display: block; width: 100%; height: 300px; }
+.river-grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.river-split {
+  stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.river-today { stroke: var(--faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* Trails are geometry in a stretched viewBox; without this the horizontal
+   scale would thin them to nothing on a narrow screen. */
+.river-trail {
+  fill: none; stroke: var(--text); stroke-width: 1.4; opacity: .45;
+  stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke;
+  transition: opacity .12s ease, stroke-width .12s ease;
+}
+.river-trail.on { stroke: var(--pos); stroke-width: 2.6; opacity: 1; }
+.river-trail.off { opacity: .08; }
+
+.river-axis { position: absolute; inset: 0; pointer-events: none; }
+.river-axis span {
+  position: absolute; left: 4px; transform: translateY(-50%);
+  font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.river-axis .beyond { color: var(--muted); }
+
+.river-dates {
+  display: flex; justify-content: space-between;
+  margin: 5px 14px 0; font-size: 10.5px; color: var(--faint);
+}
+
+.river-names { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 12px 4px; }
+.river-names button {
+  min-height: var(--tap); padding: 0 11px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 560; cursor: pointer;
+}
+.river-names button .r { color: var(--faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.river-names button[aria-pressed="true"] {
+  border-color: var(--pos); color: var(--pos); background: var(--chip);
+}
+.river-names button[aria-pressed="true"] .r { color: var(--pos); }
+
+/* The Labs entry point on the list: secondary by construction. */
+.labs-link {
+  display: inline-block; margin-top: 8px; min-height: var(--tap); line-height: var(--tap);
+  padding: 0 2px; color: var(--muted); font-size: 11.5px; text-decoration: none;
+}
+.labs-link:hover { color: var(--text); }

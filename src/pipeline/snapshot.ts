@@ -23,10 +23,20 @@ import { crossSectionalNormalize } from './normalize.ts';
 import type { UniverseMember } from './universe.ts';
 import type { UniverseClusters } from './universeClusters.ts';
 
-const r = (x: number, dp: number): number => {
+/**
+ * Fixed-decimal rounding for serialized columns.
+ *
+ * Exported because the rank-history backfill has to round identically: the
+ * browser ranks from the rounded columns it is shipped, so a backfill using
+ * full precision would disagree with the product in the last decimal place —
+ * exactly where the symbol tie-break decides the order.
+ */
+export const roundTo = (x: number, dp: number): number => {
   const f = 10 ** dp;
   return Math.round(x * f) / f;
 };
+
+const r = roundTo;
 
 export interface SnapshotInput {
   asOf: string;

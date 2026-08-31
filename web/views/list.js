@@ -294,6 +294,16 @@ function paintRows(body, snapshot, matches) {
     Filtering hides rows; it never renumbers them.<br>
     Data: Financial Modeling Prep · <code>${snapshot.meta.dataHash.slice(0, 16)}</code>`;
   body.append(foot);
+
+  // The only reference to Labs anywhere in the product, and deliberately the
+  // quietest thing on the screen: an experiment should be findable without
+  // competing with the ranking for attention.
+  const labs = document.createElement('a');
+  labs.className = 'labs-link';
+  labs.href = '#/labs';
+  labs.textContent = 'Labs — experiments ›';
+  labs.addEventListener('click', (e) => { e.preventDefault(); navigate('labs'); });
+  body.append(labs);
 }
 
 /**
